@@ -169,6 +169,15 @@ function applyAllParams() {
   l2d.setParams({ ...paramValues })
 }
 
+function setAllParams(values) {
+  for (const key of Object.keys(values)) {
+    if (key in paramValues) {
+      paramValues[key] = values[key]
+    }
+  }
+  if (l2d) applyAllParams()
+}
+
 function applyMouseTrack(x, y, cvs) {
   if (!mouseTrackEnabled.value || !l2d || !cvs) return
   const rect = cvs.getBoundingClientRect()
@@ -232,6 +241,7 @@ export function useModel() {
     setParam,
     resetGroup,
     resetAllParams,
+    setAllParams,
     applyMouseTrack,
     destroy,
     setStatus,
