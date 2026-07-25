@@ -3,6 +3,18 @@ import { ref, reactive, computed } from 'vue'
 const DEFAULT_FPS = 30
 const DEFAULT_DURATION = 3
 
+const EASING_TYPES = ['linear', 'easeIn', 'easeOut', 'easeInOut']
+const EASING_LABELS = { linear: '线性', easeIn: '缓入', easeOut: '缓出', easeInOut: '缓入缓出' }
+
+function applyEasing(t, type) {
+  switch (type) {
+    case 'easeIn': return t * t * t
+    case 'easeOut': return 1 - Math.pow(1 - t, 3)
+    case 'easeInOut': return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
+    default: return t
+  }
+}
+
 export function useKeyframeAnimation() {
   const fps = ref(DEFAULT_FPS)
   const duration = ref(DEFAULT_DURATION)
@@ -33,7 +45,7 @@ export function useKeyframeAnimation() {
     if (idx >= 0) {
       kfs[idx].value = value
     } else {
-      kfs.push({ frame: f, value })
+      kfs.push({ frame: f, value, easing: 'linear' })
     }
     kfs.sort((a, b) => a.frame - b.frame)
   }
@@ -55,6 +67,27 @@ export function useKeyframeAnimation() {
     return keyframes[paramKey]?.some(k => k.frame === f) ?? false
   }
 
+  function getKfEasing(paramKey, frame) {
+    const f = Math.round(frame)
+    const kf = keyframes[paramKey]?.find(k => k.frame === f)
+    return kf?.easing || 'linear'
+  }
+
+  function cycleEasingAtFrame(frame) {
+    const f = Math.round(frame)
+    for (const paramKey of Object.keys(keyframes)) {
+      const kf = keyframes[paramKey].find(k => k.frame === f)
+      if (kf) {
+        const idx = EASING_TYPES.indexOf(kf.easing || 'linear')
+        kf.easing = EASING_TYPES[(idx + 1) % EASING_TYPES.length]
+      }
+    }
+  }
+
+  function getEasingLabel(type) {
+    return EASING_LABELS[type] || '线性'
+  }
+
   function getKeyframesForParam(paramKey) {
     return [...(keyframes[paramKey] || [])]
   }
@@ -74,7 +107,8 @@ export function useKeyframeAnimation() {
         const range = kfs[i + 1].frame - kfs[i].frame
         if (range === 0) return kfs[i].value
         const t = (f - kfs[i].frame) / range
-        return kfs[i].value + (kfs[i + 1].value - kfs[i].value) * t
+        const eased = applyEasing(t, kfs[i].easing || 'linear')
+        return kfs[i].value + (kfs[i + 1].value - kfs[i].value) * eased
       }
     }
     return null
@@ -230,7 +264,12 @@ export function useKeyframeAnimation() {
     if (data.currentFrame != null) currentFrame.value = data.currentFrame
     if (data.keyframes) {
       for (const key of Object.keys(keyframes)) delete keyframes[key]
-      Object.assign(keyframes, data.keyframes)
+      for (const [paramKey, kfs] of Object.entries(data.keyframes)) {
+        keyframes[paramKey] = kfs.map(kf => ({
+          ...kf,
+          easing: kf.easing || 'linear',
+        }))
+      }
     }
   }
 
@@ -245,6 +284,7 @@ export function useKeyframeAnimation() {
     fps, duration, currentFrame, isPlaying, isLooping, keyframes,
     totalFrames, currentTime,
     setKeyframe, removeKeyframe, hasKeyframe,
+    getKfEasing, cycleEasingAtFrame, getEasingLabel,
     getKeyframesForParam, getValueAtFrame, getAllValuesAtFrame, getKeyframedValuesAtFrame,
     getAllKeyframedParams, getAllKeyframes, getUniqueFramePositions,
     goToFrame, goToStart, goToEnd,

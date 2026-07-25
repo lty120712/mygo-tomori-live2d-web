@@ -185,10 +185,10 @@ function applyMouseTrack(x, y, cvs) {
   const cy = rect.height / 2
   const dx = (x - cx) / cx
   const dy = (y - cy) / cy
-  const p = { ...paramValues }
-  p.PARAM_ANGLE_X = dy * 15
-  p.PARAM_ANGLE_Y = dx * 15
-  l2d.setParams(p)
+  l2d.setParams({
+    PARAM_ANGLE_X: dy * 15,
+    PARAM_ANGLE_Y: dx * 15,
+  })
 }
 
 function destroy() {

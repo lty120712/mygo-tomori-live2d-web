@@ -78,10 +78,10 @@ export const PARAM_GROUPS = [
   },
   {
     key: 'clothes',
-    header: '衣袖',
+    header: '裙摆',
     defaultOpen: false,
     params: [
-      { key: 'PARAM_CLOTHES_A', label: '衣袖摆动', min: -1, max: 1, step: 0.1, default: 0 },
+      { key: 'PARAM_CLOTHES_A', label: '裙摆摆动', min: -1, max: 1, step: 0.1, default: 0 },
     ],
   },
 ]

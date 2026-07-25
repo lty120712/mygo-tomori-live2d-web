@@ -68,13 +68,15 @@
         <a-tooltip
           v-for="pos in uniqueFrames"
           :key="pos"
-          :content="'帧 ' + pos + ' · ' + (pos / kf.fps.value).toFixed(2) + 's'"
+          :content="'帧 ' + pos + ' · ' + (pos / kf.fps.value).toFixed(2) + 's · ' + kfEasingLabel(pos)"
           position="bottom"
           mini
         >
           <div
             class="bb-kf-dot"
+            :class="'easing-' + kfDominantEasing(pos)"
             :style="{ left: ((pos / kf.totalFrames.value) * 100) + '%' }"
+            @click.stop="kf.cycleEasingAtFrame(pos)"
           ></div>
         </a-tooltip>
       </div>
@@ -117,7 +119,7 @@
           <span
             class="bb-diamond"
             :class="{ active: kf.hasKeyframe(p.key, kf.currentFrame.value) }"
-            title="关键帧 (点击切换)"
+            :title="kf.hasKeyframe(p.key, kf.currentFrame.value) ? '关键帧 · ' + kf.getEasingLabel(kf.getKfEasing(p.key, kf.currentFrame.value)) + ' (点击移除)' : '添加关键帧'"
             @click="toggleKeyframe(p.key)"
           >&#9670;</span>
         </div>
@@ -211,6 +213,19 @@ function onClear() {
   emit('apply-kf-values', baseValues)
 }
 
+function kfDominantEasing(frame) {
+  const f = Math.round(frame)
+  for (const paramKey of props.kf.getAllKeyframedParams()) {
+    const easing = props.kf.getKfEasing(paramKey, f)
+    if (easing !== 'linear') return easing
+  }
+  return 'linear'
+}
+
+function kfEasingLabel(frame) {
+  return props.kf.getEasingLabel(kfDominantEasing(frame))
+}
+
 function precision(step) {
   const s = String(step)
   const i = s.indexOf('.')
@@ -270,6 +285,24 @@ function precision(step) {
   position: absolute; top: 50%; width: 10px; height: 10px;
   background: #fff; border: 2px solid #e94560; border-radius: 50%;
   cursor: pointer; transform: translate(-50%, -50%);
+}
+
+.bb-kf-dot.easing-linear {
+  border-radius: 50%;
+}
+
+.bb-kf-dot.easing-easeIn {
+  border-radius: 2px;
+}
+
+.bb-kf-dot.easing-easeOut {
+  border-radius: 2px;
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.bb-kf-dot.easing-easeInOut {
+  clip-path: polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%);
+  border-radius: 0;
 }
 /* slightly larger hit area for tooltip */
 .bb-kf-track :deep(.arco-tooltip-content) {
