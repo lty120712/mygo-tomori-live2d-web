@@ -11,6 +11,13 @@
         <a-button size="mini" title="停止" @click="onStop">&#9632;</a-button>
       </div>
       <a-divider direction="vertical" style="border-color:#0f3460;margin:0 6px" />
+      <a-button
+        size="mini"
+        :type="kf.isLooping.value ? 'primary' : 'outline'"
+        title="循环播放"
+        @click="kf.isLooping.value = !kf.isLooping.value"
+      >&#8635;</a-button>
+      <a-divider direction="vertical" style="border-color:#0f3460;margin:0 6px" />
       <span class="bb-label">时长</span>
       <a-input-number
         :model-value="kf.duration.value"
@@ -41,16 +48,35 @@
       <a-button size="mini" status="danger" @click="onClear">清除全部</a-button>
     </div>
 
-    <div class="bb-timeline" ref="timelineRef" @click="seekTimeline">
-      <div class="bb-track">
-        <div class="bb-fill" :style="{ width: scrubberPercent + '%' }"></div>
-        <div
+    <div class="bb-timeline">
+      <span class="bb-row-label">时间轴</span>
+      <a-slider
+        :model-value="Math.floor(kf.currentFrame.value)"
+        :min="0"
+        :max="kf.totalFrames.value"
+        :step="1"
+        :disabled="kf.isPlaying.value"
+        :show-tooltip="true"
+        :format-tooltip="tooltipFormat"
+        @update:model-value="v => { kf.currentFrame.value = v }"
+        @change="onSliderSeek"
+      />
+    </div>
+    <div class="bb-keyframes">
+      <span class="bb-row-label">关键帧</span>
+      <div class="bb-kf-track">
+        <a-tooltip
           v-for="pos in uniqueFrames"
           :key="pos"
-          class="bb-dot"
-          :style="{ left: (pos / kf.totalFrames.value * 100) + '%' }"
-        ></div>
-        <div class="bb-playhead" :style="{ left: scrubberPercent + '%' }"></div>
+          :content="'帧 ' + pos + ' · ' + (pos / kf.fps.value).toFixed(2) + 's'"
+          position="bottom"
+          mini
+        >
+          <div
+            class="bb-kf-dot"
+            :style="{ left: ((pos / kf.totalFrames.value) * 100) + '%' }"
+          ></div>
+        </a-tooltip>
       </div>
     </div>
 
@@ -128,16 +154,10 @@ const emit = defineEmits(['set-param', 'reset-group', 'reset-all', 'update:mouse
 
 const groups = PARAM_GROUPS
 const baseValues = initParamValues()
-const timelineRef = ref(null)
 const activeGroup = ref(groups[0]?.key || 'mouth')
 
 const activeGroupObj = computed(() => groups.find(g => g.key === activeGroup.value))
 const uniqueFrames = computed(() => props.kf.getUniqueFramePositions())
-
-const scrubberPercent = computed(() => {
-  if (props.kf.totalFrames.value === 0) return 0
-  return (props.kf.currentFrame.value / props.kf.totalFrames.value) * 100
-})
 
 function getDisplayValue(paramKey) {
   return props.values[paramKey] ?? baseValues[paramKey] ?? 0
@@ -161,18 +181,22 @@ function toggleKeyframe(paramKey) {
   }
 }
 
-function seekTimeline(e) {
-  if (props.kf.isPlaying.value) return
-  const rect = timelineRef.value.getBoundingClientRect()
-  const ratio = (e.clientX - rect.left) / rect.width
-  props.kf.goToFrame(Math.round(ratio * props.kf.totalFrames.value))
+function tooltipFormat(frame) {
+  const t = frame / props.kf.fps.value
+  return '帧 ' + Math.round(frame) + ' · ' + t.toFixed(2) + 's'
+}
+
+function onSliderSeek(frame) {
+  props.kf.goToFrame(frame)
   const vals = props.kf.getAllValuesAtFrame(props.kf.currentFrame.value, baseValues)
   emit('apply-kf-values', vals)
 }
 
 function onPlay() {
   props.kf.play((frame) => {
-    const vals = props.kf.getAllValuesAtFrame(frame, baseValues)
+    const vals = props.kf.isLooping.value
+      ? props.kf.getKeyframedValuesAtFrame(frame)
+      : props.kf.getAllValuesAtFrame(frame, baseValues)
     emit('apply-kf-values', vals)
   })
 }
@@ -214,26 +238,45 @@ function precision(step) {
 .bb-spacer { flex: 1; }
 
 /* Timeline */
-.bb-timeline { padding: 5px 24px; flex-shrink: 0; cursor: pointer; }
-.bb-track {
-  position: relative; height: 18px; background: #1a1a3e;
-  border-radius: 9px; border: 1px solid #0f3460;
+.bb-timeline {
+  display: flex; align-items: center; padding: 4px 24px 2px 0; flex-shrink: 0; gap: 8px;
 }
-.bb-fill {
-  position: absolute; left: 0; top: 0; height: 100%;
-  background: rgba(233,69,96,0.1); border-radius: 9px;
-  pointer-events: none;
+.bb-row-label {
+  color: #888; font-size: 11px; flex-shrink: 0; width: 42px; text-align: right;
 }
-.bb-playhead {
-  position: absolute; top: -4px; bottom: -4px; width: 3px;
-  background: #e94560; border-radius: 2px; pointer-events: none;
-  transform: translateX(-1.5px); z-index: 2;
+.bb-timeline :deep(.arco-slider) { padding: 0; flex: 1; }
+.bb-timeline :deep(.arco-slider-road) {
+  background: #1a1a3e; border: 1px solid #0f3460; height: 10px;
 }
-.bb-dot {
-  position: absolute; top: 50%; width: 7px; height: 7px;
-  background: #e94560; border-radius: 50%; pointer-events: none;
-  transform: translate(-50%, -50%); z-index: 1;
+.bb-timeline :deep(.arco-slider-bar) { background: #e94560; height: 10px; }
+.bb-timeline :deep(.arco-slider-button) {
+  width: 16px; height: 16px; background: #fff;
+  border: 2px solid #165DFF; box-shadow: 0 1px 4px rgba(0,0,0,0.3);
 }
+.bb-timeline :deep(.arco-tooltip-content) {
+  background: #1a1a3e; border: 1px solid #0f3460; color: #eee;
+  font-size: 12px; font-variant-numeric: tabular-nums;
+}
+.bb-timeline :deep(.arco-tooltip-arrow) { display: none; }
+
+/* Keyframe dots row */
+.bb-keyframes {
+  display: flex; align-items: center; padding: 2px 24px 6px 0; flex-shrink: 0; gap: 8px;
+}
+.bb-kf-track {
+  position: relative; height: 8px; flex: 1;
+}
+.bb-kf-dot {
+  position: absolute; top: 50%; width: 10px; height: 10px;
+  background: #fff; border: 2px solid #e94560; border-radius: 50%;
+  cursor: pointer; transform: translate(-50%, -50%);
+}
+/* slightly larger hit area for tooltip */
+.bb-kf-track :deep(.arco-tooltip-content) {
+  background: #1a1a3e; border: 1px solid #0f3460; color: #eee;
+  font-size: 12px; font-variant-numeric: tabular-nums;
+}
+.bb-kf-track :deep(.arco-tooltip-arrow) { display: none; }
 
 /* Parameter groups */
 .bb-params {

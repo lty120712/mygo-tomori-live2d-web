@@ -12,6 +12,7 @@
         :mouseTrackEnabled="mouseTrackEnabled"
         @mouse-move="onCanvasMouse"
       />
+      <div class="canvas-sep"></div>
       <BottomBar
         :values="paramValues"
         :kf="kf"
@@ -103,4 +104,5 @@ html, body, #app { margin:0; padding:0; height:100%; overflow:hidden; }
 body { font-family:'Segoe UI',sans-serif; background:#1a1a2e; color:#eee; }
 .app-root { display:flex; height:100vh; }
 .main-area { flex:1; display:flex; flex-direction:column; min-width:0; }
+.canvas-sep { height: 4px; flex-shrink: 0; background: #e94560; opacity: 0.6; }
 </style>

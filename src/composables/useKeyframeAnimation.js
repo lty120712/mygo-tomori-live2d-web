@@ -10,6 +10,8 @@ export function useKeyframeAnimation() {
   const isPlaying = ref(false)
   const keyframes = reactive({})
 
+  const isLooping = ref(false)
+
   const totalFrames = computed(() => Math.floor(fps.value * duration.value))
   const currentTime = computed(() => currentFrame.value / fps.value)
 
@@ -80,6 +82,17 @@ export function useKeyframeAnimation() {
 
   function getAllValuesAtFrame(frame, defaults) {
     const result = { ...defaults }
+    for (const paramKey of Object.keys(keyframes)) {
+      const val = getValueAtFrame(paramKey, frame)
+      if (val !== null) {
+        result[paramKey] = val
+      }
+    }
+    return result
+  }
+
+  function getKeyframedValuesAtFrame(frame) {
+    const result = {}
     for (const paramKey of Object.keys(keyframes)) {
       const val = getValueAtFrame(paramKey, frame)
       if (val !== null) {
@@ -165,7 +178,13 @@ export function useKeyframeAnimation() {
       if (tickCallback) tickCallback(currentFrame.value)
 
       if (currentFrame.value >= totalFrames.value) {
-        stop()
+        if (isLooping.value) {
+          currentFrame.value = 0
+          lastTimestamp = null
+          animFrameId = requestAnimationFrame(tick)
+        } else {
+          stop()
+        }
       } else {
         animFrameId = requestAnimationFrame(tick)
       }
@@ -223,10 +242,10 @@ export function useKeyframeAnimation() {
   }
 
   return {
-    fps, duration, currentFrame, isPlaying, keyframes,
+    fps, duration, currentFrame, isPlaying, isLooping, keyframes,
     totalFrames, currentTime,
     setKeyframe, removeKeyframe, hasKeyframe,
-    getKeyframesForParam, getValueAtFrame, getAllValuesAtFrame,
+    getKeyframesForParam, getValueAtFrame, getAllValuesAtFrame, getKeyframedValuesAtFrame,
     getAllKeyframedParams, getAllKeyframes, getUniqueFramePositions,
     goToFrame, goToStart, goToEnd,
     goToPrevKeyframe, goToNextKeyframe,

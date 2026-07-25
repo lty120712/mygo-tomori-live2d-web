@@ -2,8 +2,8 @@
   <div class="right-panel">
     <div class="section">
       <h3 class="section-title">动作</h3>
-      <a-scrollbar :style="{ maxHeight: motionMaxH + 'px', overflow: 'auto' }">
-        <div ref="motionGridRef" class="chip-grid">
+      <a-scrollbar class="section-scroll">
+        <div class="chip-grid">
           <a-tooltip
             v-for="g in motionGroups"
             :key="g"
@@ -35,8 +35,8 @@
 
     <div class="section">
       <h3 class="section-title">表情</h3>
-      <a-scrollbar :style="{ maxHeight: exprMaxH + 'px', overflow: 'auto' }">
-        <div ref="exprGridRef" class="chip-grid">
+      <a-scrollbar class="section-scroll">
+        <div class="chip-grid">
           <span
             v-for="e in expressionIds"
             :key="e"
@@ -57,8 +57,6 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, nextTick } from 'vue'
-
 const props = defineProps({
   motionGroups: { type: Array, default: () => [] },
   currentMotion: { type: String, default: '' },
@@ -69,12 +67,6 @@ const props = defineProps({
   toastMsg: { type: String, default: '' },
 })
 const emit = defineEmits(['play-motion', 'set-expression', 'reset'])
-
-const MAX_ROWS = 6
-const motionGridRef = ref(null)
-const exprGridRef = ref(null)
-const motionMaxH = ref(0)
-const exprMaxH = ref(0)
 
 const PALETTE = {
   smile: '#f5a623',
@@ -131,33 +123,6 @@ function onMotionClick(g) {
   if (props.motionPlaying && props.currentMotion !== g) return
   emit('play-motion', g)
 }
-
-function measureGrid(el) {
-  if (!el || el.children.length === 0) return 186
-  const first = el.children[0]
-  let singleRowH = first.offsetHeight
-  for (let i = 1; i < Math.min(el.children.length, 12); i++) {
-    const child = el.children[i]
-    if (child.offsetTop > first.offsetTop) {
-      singleRowH = child.offsetTop - first.offsetTop
-      break
-    }
-  }
-  const last = el.children[el.children.length - 1]
-  const lastBottom = last.offsetTop + last.offsetHeight
-  const totalRows = Math.ceil((lastBottom - first.offsetTop) / singleRowH)
-  return Math.min(totalRows, MAX_ROWS) * singleRowH + 2
-}
-
-function recalc() {
-  nextTick(() => {
-    motionMaxH.value = measureGrid(motionGridRef.value)
-    exprMaxH.value = measureGrid(exprGridRef.value)
-  })
-}
-
-onMounted(recalc)
-watch(() => [props.motionGroups, props.expressionIds], recalc)
 </script>
 
 <style scoped>
@@ -167,11 +132,15 @@ watch(() => [props.motionGroups, props.expressionIds], recalc)
   overflow: hidden; position: relative;
 }
 .section {
-  padding: 0 12px; flex-shrink: 0;
+  padding: 0 12px 4px; flex: 1; min-height: 0;
+  display: flex; flex-direction: column; overflow: hidden;
 }
 .section-title {
-  font-size: 13px; color: #aaa; margin: 0 0 8px;
+  font-size: 13px; color: #aaa; margin: 0 0 8px; flex-shrink: 0;
   padding-bottom: 6px; border-bottom: 1px solid #0f3460;
+}
+.section-scroll {
+  flex: 1; min-height: 0; overflow: auto;
 }
 .chip-grid {
   display: flex; flex-wrap: wrap; gap: 4px; padding: 2px 0;
@@ -208,7 +177,7 @@ watch(() => [props.motionGroups, props.expressionIds], recalc)
 .expr-chip.active .chip-dot { background: #fff !important; }
 
 .reset-btn {
-  margin: 8px 12px; flex-shrink: 0;
+  margin: 6px 12px; flex-shrink: 0;
   border-color: #4a5568; color: #94a3b8;
   transition: all 0.15s;
 }
