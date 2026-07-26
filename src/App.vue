@@ -16,6 +16,9 @@
       <BottomBar
         :values="paramValues"
         :kf="kf"
+        :motionGroups="motionGroups"
+        :expressionIds="expressionIds"
+        :motionDurations="motionDurations"
         :mouseTrackEnabled="mouseTrackEnabled"
         :motionProgress="motionProgress"
         :motionLabel="motionLabel"
@@ -24,6 +27,8 @@
         @reset-group="resetGroup"
         @reset-all="resetAllParams"
         @apply-kf-values="setAllParams"
+        @trigger-motion="playMotion"
+        @trigger-expression="setExpression"
         @update:mouseTrackEnabled="v => mouseTrackEnabled = v"
       />
     </div>

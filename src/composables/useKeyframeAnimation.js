@@ -88,6 +88,41 @@ export function useKeyframeAnimation() {
     return EASING_LABELS[type] || '线性'
   }
 
+  const events = reactive([])
+
+  function canAddMotionEvent(frame, durationSec) {
+    if (totalFrames.value === 0) return false
+    const start = Math.round(frame)
+    const end = start + durationSec * fps.value
+    for (const e of events) {
+      if (e.type !== 'motion') continue
+      const eEnd = e.frame + (e.duration || 0) * fps.value
+      if (start < eEnd && end > e.frame) return false
+    }
+    return true
+  }
+
+  function addEvent(type, name, frame, durationSec) {
+    const f = Math.round(frame)
+    if (type === 'motion' && !canAddMotionEvent(f, durationSec)) return false
+    events.push({ type, name, frame: f, duration: durationSec || 0 })
+    events.sort((a, b) => a.frame - b.frame)
+    return true
+  }
+
+  function removeEvent(index) {
+    events.splice(index, 1)
+  }
+
+  function getActiveEventsAtFrame(frame) {
+    const f = Math.round(frame)
+    return events.filter(e => {
+      if (e.type === 'expression') return e.frame === f
+      const eEnd = e.frame + (e.duration || 0) * fps.value
+      return f >= e.frame && f < eEnd
+    })
+  }
+
   function getKeyframesForParam(paramKey) {
     return [...(keyframes[paramKey] || [])]
   }
@@ -291,5 +326,6 @@ export function useKeyframeAnimation() {
     goToPrevKeyframe, goToNextKeyframe,
     play, pause, stop, setDuration,
     toJSON, fromJSON, clearAll,
+    events, canAddMotionEvent, addEvent, removeEvent, getActiveEventsAtFrame,
   }
 }

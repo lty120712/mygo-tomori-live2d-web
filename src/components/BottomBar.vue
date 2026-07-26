@@ -5,7 +5,7 @@
         <a-button size="mini" title="跳到开头" @click="kf.goToStart()">|<</a-button>
         <a-button size="mini" title="上一帧" @click="kf.goToFrame(kf.currentFrame.value - 1)">&#9664;</a-button>
         <a-button v-if="!kf.isPlaying.value" size="mini" type="primary" title="播放" @click="onPlay">&#9654;</a-button>
-        <a-button v-else size="mini" status="warning" title="暂停" @click="kf.pause()">&#9646;&#9646;</a-button>
+        <a-button v-else size="mini" status="warning" title="暂停" @click="onPause">&#9646;&#9646;</a-button>
         <a-button size="mini" title="下一帧" @click="kf.goToFrame(kf.currentFrame.value + 1)">&#9654;</a-button>
         <a-button size="mini" title="跳到末尾" @click="kf.goToEnd()">>|</a-button>
         <a-button size="mini" title="停止" @click="onStop">&#9632;</a-button>
@@ -21,16 +21,17 @@
       <span class="bb-label">时长</span>
       <a-input-number
         :model-value="kf.duration.value"
-        :min="0.5" :max="60" :step="0.5"
-        size="mini" style="width:64px"
-        @change="kf.setDuration($event)"
+        :min="0.5" :max="600" :step="0.5"
+        :precision="1"
+        size="mini" style="width:72px"
+        @update:model-value="v => kf.setDuration(v)"
       />
       <span class="bb-label">FPS</span>
       <a-input-number
         :model-value="kf.fps.value"
         :min="1" :max="60" :step="1"
         size="mini" style="width:58px"
-        @change="v => kf.fps.value = v"
+        @update:model-value="v => kf.fps.value = v"
       />
       <a-divider direction="vertical" style="border-color:#0f3460;margin:0 6px" />
       <span class="bb-info">帧 <b>{{ Math.floor(kf.currentFrame.value) }}</b> / {{ kf.totalFrames.value }}</span>
@@ -40,11 +41,16 @@
       <a-input-number
         :model-value="Math.floor(kf.currentFrame.value)"
         :min="0" :max="kf.totalFrames.value"
-        size="mini" style="width:60px"
-        @change="kf.goToFrame($event)"
+        size="mini" style="width:68px"
+        @update:model-value="kf.goToFrame($event)"
       />
       <a-button size="mini" @click="kf.goToNextKeyframe()">下一关键帧</a-button>
       <div class="bb-spacer"></div>
+      <input ref="audioInputRef" type="file" accept="audio/*" style="display:none" @change="onAudioSelected" />
+      <a-button size="mini" title="加载音频" @click="audioInputRef.click()">&#9835;</a-button>
+      <span v-if="audioName" class="bb-info" :title="audioName">{{ audioName }}</span>
+      <span v-else class="bb-label">无音频</span>
+      <a-divider direction="vertical" style="border-color:#0f3460;margin:0 6px" />
       <a-button size="mini" status="danger" @click="onClear">清除全部</a-button>
     </div>
 
@@ -67,7 +73,7 @@
       <div class="bb-kf-track">
         <a-tooltip
           v-for="pos in uniqueFrames"
-          :key="pos"
+          :key="'kf-' + pos"
           :content="'帧 ' + pos + ' · ' + (pos / kf.fps.value).toFixed(2) + 's · ' + kfEasingLabel(pos)"
           position="bottom"
           mini
@@ -79,6 +85,78 @@
             @click.stop="kf.cycleEasingAtFrame(pos)"
           ></div>
         </a-tooltip>
+        <a-tooltip
+          v-for="pos in motionEventFrames"
+          :key="'ev-m-' + pos"
+          :content="'动作事件 · 帧 ' + pos + ' · ' + (pos / kf.fps.value).toFixed(2) + 's'"
+          position="bottom"
+          mini
+        >
+          <div
+            class="bb-kf-dot bb-ev-motion-marker"
+            :style="{ left: ((pos / kf.totalFrames.value) * 100) + '%' }"
+          ></div>
+        </a-tooltip>
+        <a-tooltip
+          v-for="pos in exprEventFrames"
+          :key="'ev-e-' + pos"
+          :content="'表情事件 · 帧 ' + pos + ' · ' + (pos / kf.fps.value).toFixed(2) + 's'"
+          position="bottom"
+          mini
+        >
+          <div
+            class="bb-kf-dot bb-ev-expr-marker"
+            :style="{ left: ((pos / kf.totalFrames.value) * 100) + '%' }"
+          ></div>
+        </a-tooltip>
+      </div>
+    </div>
+
+    <div class="bb-events">
+      <span class="bb-row-label">事件</span>
+      <div class="bb-ev-track" @click="onEventTrackClick">
+        <a-tooltip
+          v-for="(ev, i) in kf.events"
+          :key="i"
+          :content="ev.name + (ev.type === 'motion' ? ' · ' + (ev.duration || 0).toFixed(1) + 's' : '') + ' (点击删除)'"
+          position="top"
+          mini
+        >
+          <div
+            class="bb-ev-bar"
+            :class="'ev-' + ev.type"
+            :style="eventBarStyle(ev)"
+            @click.stop="kf.removeEvent(i)"
+          >{{ ev.name }}</div>
+        </a-tooltip>
+      </div>
+      <a-button v-if="showEventPicker" size="mini" class="bb-ev-close" @click="showEventPicker = false">✕</a-button>
+      <a-button v-if="kf.events.length" size="mini" class="bb-ev-clear" @click="clearEvents">清除事件</a-button>
+    </div>
+    <div v-if="showEventPicker" class="bb-ev-picker">
+      <span class="bb-ev-pick-label">在帧 {{ pendingEventFrame }} 添加：</span>
+      <div class="bb-ev-pick-row">
+        <a-select
+          :model-value="eventPickName"
+          size="mini"
+          style="width:150px"
+          placeholder="-- 动作 --"
+          allow-search
+          @change="addMotionEvent"
+        >
+          <a-option v-for="g in motionGroups" :key="g" :value="g">{{ g }}</a-option>
+        </a-select>
+        <a-select
+          :model-value="eventPickExpr"
+          size="mini"
+          style="width:150px"
+          placeholder="-- 表情 --"
+          allow-search
+          @change="addExpressionEvent"
+        >
+          <a-option v-for="e in expressionIds" :key="e" :value="e">{{ e }}</a-option>
+        </a-select>
+        <a-button size="mini" @click="showEventPicker = false">取消</a-button>
       </div>
     </div>
 
@@ -101,7 +179,7 @@
             :max="p.max"
             :step="p.step"
             :disabled="kf.isPlaying.value"
-            style="flex:1;margin:0 4px;"
+            style="width:140px;flex-shrink:0;margin:0 4px;"
             @change="v => onChangeParam(p, v)"
           />
           <a-input-number
@@ -131,28 +209,31 @@
       <span class="bb-label">鼠标跟随</span>
       <a-switch size="small" :model-value="mouseTrackEnabled" @change="$emit('update:mouseTrackEnabled', $event)" />
       <div v-if="motionLabel" class="bb-motion-info">
-        <span>{{ motionLabel }}</span>
-        <a-progress :percent="motionProgress / 100" size="small" :show-text="false" style="width:80px" />
-        <span>{{ motionRemain }}</span>
+        <span class="bb-motion-name">{{ motionLabel }}</span>
+        <a-progress :percent="motionProgress / 100" size="small" color="#e94560" :show-text="false" style="width:100px" />
+        <span class="bb-motion-time">{{ motionRemain }}</span>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import { PARAM_GROUPS, initParamValues } from '../params.js'
 
 const props = defineProps({
   values: { type: Object, required: true },
   kf: { type: Object, required: true },
+  motionGroups: { type: Array, default: () => [] },
+  expressionIds: { type: Array, default: () => [] },
+  motionDurations: { type: Object, default: () => ({}) },
   mouseTrackEnabled: { type: Boolean, default: true },
   motionProgress: { type: Number, default: 0 },
   motionLabel: { type: String, default: '' },
   motionRemain: { type: String, default: '' },
 })
 
-const emit = defineEmits(['set-param', 'reset-group', 'reset-all', 'update:mouseTrackEnabled', 'apply-kf-values'])
+const emit = defineEmits(['set-param', 'reset-group', 'reset-all', 'update:mouseTrackEnabled', 'apply-kf-values', 'trigger-motion', 'trigger-expression'])
 
 const groups = PARAM_GROUPS
 const baseValues = initParamValues()
@@ -160,6 +241,17 @@ const activeGroup = ref(groups[0]?.key || 'mouth')
 
 const activeGroupObj = computed(() => groups.find(g => g.key === activeGroup.value))
 const uniqueFrames = computed(() => props.kf.getUniqueFramePositions())
+const motionEventFrames = computed(() => props.kf.events.filter(e => e.type === 'motion').map(e => e.frame).filter((v, i, a) => a.indexOf(v) === i))
+const exprEventFrames = computed(() => props.kf.events.filter(e => e.type === 'expression').map(e => e.frame).filter((v, i, a) => a.indexOf(v) === i))
+
+const audioInputRef = ref(null)
+const audioName = ref('')
+let audioEl = null
+
+const showEventPicker = ref(false)
+const eventPickName = ref('')
+const eventPickExpr = ref('')
+const pendingEventFrame = ref(0)
 
 function getDisplayValue(paramKey) {
   return props.values[paramKey] ?? baseValues[paramKey] ?? 0
@@ -190,22 +282,65 @@ function tooltipFormat(frame) {
 
 function onSliderSeek(frame) {
   props.kf.goToFrame(frame)
+  if (audioEl && !props.kf.isPlaying.value) {
+    audioEl.currentTime = frame / props.kf.fps.value
+  }
   const vals = props.kf.getAllValuesAtFrame(props.kf.currentFrame.value, baseValues)
   emit('apply-kf-values', vals)
 }
 
+let triggeredByPlay = new Set()
+
 function onPlay() {
+  triggeredByPlay = new Set()
+  if (audioEl) { audioEl.currentTime = props.kf.currentFrame.value / props.kf.fps.value; audioEl.play() }
   props.kf.play((frame) => {
-    const vals = props.kf.isLooping.value
-      ? props.kf.getKeyframedValuesAtFrame(frame)
-      : props.kf.getAllValuesAtFrame(frame, baseValues)
-    emit('apply-kf-values', vals)
+    const vals = props.kf.getKeyframedValuesAtFrame(frame)
+    if (Object.keys(vals).length > 0) emit('apply-kf-values', vals)
+
+    const f = Math.round(frame)
+    for (let i = 0; i < props.kf.events.length; i++) {
+      const ev = props.kf.events[i]
+      if (triggeredByPlay.has(i)) continue
+      if (ev.type === 'expression' && ev.frame === f) {
+        triggeredByPlay.add(i)
+        emit('trigger-expression', ev.name)
+      }
+      if (ev.type === 'motion' && f >= ev.frame) {
+        triggeredByPlay.add(i)
+        emit('trigger-motion', ev.name)
+      }
+    }
   })
 }
 
+function onPause() {
+  if (audioEl) audioEl.pause()
+  props.kf.pause()
+}
+
 function onStop() {
+  if (audioEl) { audioEl.pause(); audioEl.currentTime = 0 }
   props.kf.stop()
   emit('apply-kf-values', props.kf.getAllValuesAtFrame(0, baseValues))
+}
+
+function onAudioSelected(e) {
+  const file = e.target.files?.[0]
+  if (!file) return
+  if (audioEl) { audioEl.pause(); URL.revokeObjectURL(audioEl.src) }
+  audioEl = new Audio(URL.createObjectURL(file))
+  audioEl.volume = 0.8
+  audioEl.addEventListener('loadedmetadata', () => {
+    if (audioEl.duration && isFinite(audioEl.duration)) {
+      props.kf.setDuration(Math.ceil(audioEl.duration * 2) / 2)
+    }
+  })
+  audioEl.addEventListener('ended', () => {
+    if (props.kf.isPlaying.value && !props.kf.isLooping.value) onStop()
+  })
+  audioName.value = file.name
+  e.target.value = ''
 }
 
 function onClear() {
@@ -226,6 +361,53 @@ function kfEasingLabel(frame) {
   return props.kf.getEasingLabel(kfDominantEasing(frame))
 }
 
+function eventBarStyle(ev) {
+  const left = (ev.frame / props.kf.totalFrames.value) * 100
+  if (ev.type === 'expression') {
+    return { left: left + '%' }
+  }
+  const width = ((ev.duration || 0) * props.kf.fps.value / props.kf.totalFrames.value) * 100
+  return { left: left + '%', width: Math.max(width, 2) + '%' }
+}
+
+function onEventTrackClick(e) {
+  if (props.kf.isPlaying.value) return
+  pendingEventFrame.value = Math.floor(props.kf.currentFrame.value)
+  showEventPicker.value = true
+}
+
+function addMotionEvent(name) {
+  if (!name) return
+  const dur = props.motionDurations?.[name] || 2
+  const ok = props.kf.addEvent('motion', name, pendingEventFrame.value, dur)
+  if (!ok) {
+    alert('该时间段与已有动作事件重叠，无法添加')
+  }
+  showEventPicker.value = false
+  eventPickName.value = ''
+}
+
+function addExpressionEvent(name) {
+  if (!name) return
+  props.kf.addEvent('expression', name, pendingEventFrame.value, 0)
+  showEventPicker.value = false
+  eventPickExpr.value = ''
+}
+
+function clearEvents() {
+  props.kf.events.splice(0, props.kf.events.length)
+}
+
+function onKeydown(e) {
+  if (e.code === 'Space' && e.target === document.body) {
+    e.preventDefault()
+    props.kf.isPlaying.value ? onPause() : onPlay()
+  }
+}
+
+onMounted(() => document.addEventListener('keydown', onKeydown))
+onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
+
 function precision(step) {
   const s = String(step)
   const i = s.indexOf('.')
@@ -243,7 +425,7 @@ function precision(step) {
 /* Controls row */
 .bb-controls {
   display: flex; align-items: center; padding: 4px 12px; gap: 4px;
-  border-bottom: 1px solid #0f3460; flex-shrink: 0;
+  border-bottom: 1px solid #0f3460; flex-shrink: 0; flex-wrap: wrap;
 }
 .bb-btns { display:flex; gap:2px; }
 .bb-btns :deep(.arco-btn) { min-width:26px; padding:0 4px; }
@@ -304,6 +486,45 @@ function precision(step) {
   clip-path: polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%);
   border-radius: 0;
 }
+
+.bb-kf-dot.bb-ev-motion-marker {
+  width: 6px; height: 6px; background: #e94560; border-color: #e94560;
+}
+.bb-kf-dot.bb-ev-expr-marker {
+  width: 6px; height: 6px; background: #2dd4bf; border-color: #2dd4bf;
+}
+
+/* Events row */
+.bb-events {
+  display: flex; align-items: center; padding: 2px 24px 2px 0; flex-shrink: 0; gap: 8px;
+}
+.bb-ev-track {
+  position: relative; height: 20px; flex: 1; background: #1a1a3e;
+  border-radius: 4px; border: 1px solid #0f3460; cursor: pointer;
+}
+.bb-ev-track:hover { border-color: #e94560; }
+.bb-ev-bar {
+  position: absolute; top: 2px; height: 16px; border-radius: 3px;
+  display: flex; align-items: center; padding: 0 6px; font-size: 10px;
+  overflow: hidden; white-space: nowrap; cursor: pointer;
+  color: #fff; user-select: none; min-width: 6px; font-weight: 500;
+}
+.bb-ev-bar.ev-motion { background: linear-gradient(135deg, #e94560, #c0392b); }
+.bb-ev-bar.ev-motion:hover { filter: brightness(0.8); }
+.bb-ev-bar.ev-expression {
+  width: 8px !important; min-width: 8px !important;
+  background: #f5a623; border: 2px solid #fff;
+  border-radius: 50%; top: 5px; height: 8px; padding: 0; font-size: 0;
+}
+.bb-ev-close { flex-shrink: 0; }
+.bb-ev-clear { flex-shrink: 0; border-color: #e94560; color: #e94560; }
+
+.bb-ev-picker {
+  padding: 6px 24px 6px 58px; flex-shrink: 0;
+  border-bottom: 1px solid #0f3460; background: rgba(0,0,0,0.15);
+}
+.bb-ev-pick-label { color: #e94560; font-size: 12px; display: block; margin-bottom: 4px; }
+.bb-ev-pick-row { display: flex; align-items: center; gap: 8px; }
 /* slightly larger hit area for tooltip */
 .bb-kf-track :deep(.arco-tooltip-content) {
   background: #1a1a3e; border: 1px solid #0f3460; color: #eee;
@@ -331,7 +552,7 @@ function precision(step) {
   max-height: 100px; overflow-y: auto;
 }
 .bb-param-row {
-  display: flex; align-items: center; width: calc(33.33% - 8px); min-width: 260px;
+  display: flex; align-items: center; width: 280px; flex-shrink: 0;
 }
 .bb-param-label {
   color: #999; font-size: 12px; width: 56px; flex-shrink: 0;
@@ -352,5 +573,6 @@ function precision(step) {
 .bb-motion-info {
   display: flex; align-items: center; gap: 6px; margin-left: auto;
 }
-.bb-motion-info span { color: #999; font-size: 12px; }
+.bb-motion-name { color: #e94560; font-size: 12px; font-weight: 500; }
+.bb-motion-time { color: #e94560; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
 </style>
