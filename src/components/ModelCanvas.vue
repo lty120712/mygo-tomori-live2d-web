@@ -51,6 +51,7 @@ function resizeCanvas() {
 }
 
 function onMouseMove(e) {
+  if (!props.mouseTrackEnabled) return
   const cvs = canvasRef.value
   if (!cvs) return
   const rect = cvs.getBoundingClientRect()

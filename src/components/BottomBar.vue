@@ -258,6 +258,43 @@ const exprEventFrames = computed(() => props.kf.events.filter(e => e.type === 'e
 const audioInputRef = ref(null)
 const audioName = ref('')
 let audioEl = null
+let audioMetaHandler = null
+let audioEndedHandler = null
+
+function onAudioSelected(e) {
+  const file = e.target.files?.[0]
+  if (!file) return
+  if (audioEl) {
+    audioEl.pause()
+    if (audioMetaHandler) audioEl.removeEventListener('loadedmetadata', audioMetaHandler)
+    if (audioEndedHandler) audioEl.removeEventListener('ended', audioEndedHandler)
+    URL.revokeObjectURL(audioEl.src)
+  }
+  audioEl = new Audio(URL.createObjectURL(file))
+  audioEl.volume = 0.8
+  audioMetaHandler = () => {
+    if (audioEl && audioEl.duration && isFinite(audioEl.duration)) {
+      props.kf.setDuration(Math.ceil(audioEl.duration * 2) / 2)
+    }
+  }
+  audioEndedHandler = () => {
+    if (props.kf.isPlaying.value && !props.kf.isLooping.value) onStop()
+  }
+  audioEl.addEventListener('loadedmetadata', audioMetaHandler)
+  audioEl.addEventListener('ended', audioEndedHandler)
+  audioName.value = file.name
+  e.target.value = ''
+}
+
+onBeforeUnmount(() => {
+  if (audioEl) {
+    audioEl.pause()
+    if (audioMetaHandler) audioEl.removeEventListener('loadedmetadata', audioMetaHandler)
+    if (audioEndedHandler) audioEl.removeEventListener('ended', audioEndedHandler)
+    URL.revokeObjectURL(audioEl.src)
+    audioEl = null
+  }
+})
 
 const showEventPicker = ref(false)
 const eventPickName = ref('')
@@ -270,9 +307,6 @@ function getDisplayValue(paramKey) {
 
 function onChangeParam(p, value) {
   emit('set-param', p.key, value)
-  if (!props.kf.isPlaying.value) {
-    props.kf.setKeyframe(p.key, props.kf.currentFrame.value, value)
-  }
 }
 
 function toggleKeyframe(paramKey) {
@@ -304,7 +338,7 @@ let triggeredByPlay = new Set()
 
 function onPlay() {
   triggeredByPlay = new Set()
-  if (audioEl) { audioEl.currentTime = props.kf.currentFrame.value / props.kf.fps.value; audioEl.play() }
+  if (audioEl) { audioEl.currentTime = props.kf.currentFrame.value / props.kf.fps.value; audioEl.play().catch(() => {}) }
   props.kf.play((frame) => {
     const vals = props.kf.getKeyframedValuesAtFrame(frame)
     if (Object.keys(vals).length > 0) emit('apply-kf-values', vals)
@@ -336,25 +370,7 @@ function onStop() {
   if (recorder.isRecording.value) recorder.stop()
   if (audioEl) { audioEl.pause(); audioEl.currentTime = 0 }
   props.kf.stop()
-  emit('apply-kf-values', props.kf.getAllValuesAtFrame(0, baseValues))
-}
-
-function onAudioSelected(e) {
-  const file = e.target.files?.[0]
-  if (!file) return
-  if (audioEl) { audioEl.pause(); URL.revokeObjectURL(audioEl.src) }
-  audioEl = new Audio(URL.createObjectURL(file))
-  audioEl.volume = 0.8
-  audioEl.addEventListener('loadedmetadata', () => {
-    if (audioEl.duration && isFinite(audioEl.duration)) {
-      props.kf.setDuration(Math.ceil(audioEl.duration * 2) / 2)
-    }
-  })
-  audioEl.addEventListener('ended', () => {
-    if (props.kf.isPlaying.value && !props.kf.isLooping.value) onStop()
-  })
-  audioName.value = file.name
-  e.target.value = ''
+  emit('apply-kf-values', props.kf.getKeyframedValuesAtFrame(0))
 }
 
 function onClear() {
@@ -427,7 +443,7 @@ function onRecordToggle() {
 }
 
 function onKeydown(e) {
-  if (e.code === 'Space' && e.target === document.body) {
+  if (e.code === 'Space' && !['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) {
     e.preventDefault()
     props.kf.isPlaying.value ? onPause() : onPlay()
   }

@@ -72,6 +72,12 @@ function saveKfState() {
   localStorage.setItem(KF_STORAGE_KEY, JSON.stringify(kf.toJSON()))
 }
 
+let saveKfTimer = null
+function debouncedSaveKf() {
+  clearTimeout(saveKfTimer)
+  saveKfTimer = setTimeout(saveKfState, 500)
+}
+
 function loadKfState() {
   try {
     const raw = localStorage.getItem(KF_STORAGE_KEY)
@@ -81,7 +87,7 @@ function loadKfState() {
 
 watch(
   () => [kf.duration.value, kf.fps.value, kf.keyframes, kf.events],
-  () => saveKfState(),
+  () => debouncedSaveKf(),
   { deep: true }
 )
 
@@ -89,7 +95,7 @@ function onSetParam(key, value) {
   setParam(key, value)
   if (!kf.isPlaying.value) {
     kf.setKeyframe(key, kf.currentFrame.value, value)
-    saveKfState()
+    debouncedSaveKf()
   }
 }
 

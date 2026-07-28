@@ -4,6 +4,10 @@ import { PARAM_GROUPS, initParamValues } from '../params.js'
 const L2D = window.L2D
 const STORAGE_KEY = 'tomori-viewer-state'
 
+if (!L2D) {
+  console.error('Live2D SDK not loaded')
+}
+
 const MODELS = [
   "2024_furisode", "birthday_2024_ssr", "casual-2023",
   "collabo_a_ur", "collabo_d_3_ur", "dream_festival_3_ur",
@@ -82,7 +86,13 @@ async function loadModel(name, restore) {
     motionLabel.value = ''
     clearInterval(progressTimer)
   })
-  await l2d.load({ path: '/models/' + name + '/model.json', scale: 1.0 })
+  try {
+    await l2d.load({ path: '/models/' + name + '/model.json', scale: 1.0 })
+  } catch (err) {
+    setStatus('加载失败: ' + name)
+    loading.value = false
+    return
+  }
   currentModel.value = name
   statusText.value = '当前: ' + name
 
@@ -131,6 +141,11 @@ async function resetPose() {
   if (!l2d || !currentModel.value) return
   currentMotion.value = ''
   currentExpression.value = ''
+  motionPlaying.value = false
+  motionLabel.value = ''
+  motionRemain.value = ''
+  motionProgress.value = 0
+  clearInterval(progressTimer)
   const defaults = initParamValues()
   for (const key of Object.keys(defaults)) {
     paramValues[key] = defaults[key]
@@ -203,6 +218,8 @@ function applyMouseTrack(x, y, cvs) {
 }
 
 function destroy() {
+  clearInterval(progressTimer)
+  clearTimeout(toastTimer)
   if (l2d) { l2d.destroy(); l2d = null }
 }
 
@@ -223,8 +240,14 @@ function getSavedState() {
   } catch { return null }
 }
 
+let saveTimer = null
+function debouncedSave() {
+  clearTimeout(saveTimer)
+  saveTimer = setTimeout(saveState, 500)
+}
+
 watch([currentModel, currentMotion, currentExpression, mouseTrackEnabled, paramValues], () => {
-  if (currentModel.value) saveState()
+  if (currentModel.value) debouncedSave()
 }, { deep: true })
 
 export function useModel() {

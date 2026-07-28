@@ -55,7 +55,12 @@ export function useRecorder() {
     }
 
     chunks = []
-    mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' })
+    const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+      ? 'video/webm;codecs=vp9'
+      : MediaRecorder.isTypeSupported('video/webm;codecs=vp8')
+        ? 'video/webm;codecs=vp8'
+        : 'video/webm'
+    mediaRecorder = new MediaRecorder(stream, { mimeType: mime })
 
     mediaRecorder.ondataavailable = e => {
       if (e.data.size > 0) chunks.push(e.data)
@@ -124,6 +129,15 @@ export function useRecorder() {
     animFrameId = null
     outCvs = null
     outCtx = null
+  }
+
+  function destroy() {
+    cleanup()
+    if (audioCtx) {
+      audioCtx.close()
+      audioCtx = null
+      audioDest = null
+    }
   }
 
   return {
