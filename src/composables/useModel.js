@@ -178,6 +178,17 @@ function setAllParams(values) {
   if (l2d) applyAllParams()
 }
 
+function applyKfParams(values) {
+  for (const key of Object.keys(values)) {
+    if (key in paramValues) {
+      paramValues[key] = values[key]
+    }
+  }
+  if (l2d && Object.keys(values).length > 0) {
+    l2d.setParams({ ...values })
+  }
+}
+
 function applyMouseTrack(x, y, cvs) {
   if (!mouseTrackEnabled.value || !l2d || !cvs) return
   const rect = cvs.getBoundingClientRect()
@@ -242,6 +253,7 @@ export function useModel() {
     resetGroup,
     resetAllParams,
     setAllParams,
+    applyKfParams,
     applyMouseTrack,
     destroy,
     setStatus,

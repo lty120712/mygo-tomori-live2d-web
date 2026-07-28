@@ -17,6 +17,13 @@
         title="循环播放"
         @click="kf.isLooping.value = !kf.isLooping.value"
       >&#8635;</a-button>
+      <a-button
+        v-if="recorder.canRecord.value"
+        size="mini"
+        :type="recorder.isRecording.value ? 'danger' : 'outline'"
+        :title="recorder.isRecording.value ? '停止录制' : '开始录制 (自动播放)'"
+        @click="onRecordToggle"
+      >{{ recorder.isRecording.value ? '⏹ 录制中' : '⏺ 录制' }}</a-button>
       <a-divider direction="vertical" style="border-color:#0f3460;margin:0 6px" />
       <span class="bb-label">时长</span>
       <a-input-number
@@ -118,7 +125,7 @@
         <a-tooltip
           v-for="(ev, i) in kf.events"
           :key="i"
-          :content="ev.name + (ev.type === 'motion' ? ' · ' + (ev.duration || 0).toFixed(1) + 's' : '') + ' (点击删除)'"
+          :content="ev.name + (ev.type === 'motion' ? ' · ' + (props.motionDurations?.[ev.name] || ev.duration || 2).toFixed(1) + 's' : '') + ' (点击删除)'"
           position="top"
           mini
         >
@@ -130,8 +137,9 @@
           >{{ ev.name }}</div>
         </a-tooltip>
       </div>
-      <a-button v-if="showEventPicker" size="mini" class="bb-ev-close" @click="showEventPicker = false">✕</a-button>
-      <a-button v-if="kf.events.length" size="mini" class="bb-ev-clear" @click="clearEvents">清除事件</a-button>
+    </div>
+    <div v-if="kf.events.length" class="bb-ev-footer">
+      <a-button size="mini" status="danger" @click="clearEvents">清除全部事件</a-button>
     </div>
     <div v-if="showEventPicker" class="bb-ev-picker">
       <span class="bb-ev-pick-label">在帧 {{ pendingEventFrame }} 添加：</span>
@@ -220,6 +228,9 @@
 <script setup>
 import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import { PARAM_GROUPS, initParamValues } from '../params.js'
+import { useRecorder } from '../composables/useRecorder.js'
+
+const recorder = useRecorder()
 
 const props = defineProps({
   values: { type: Object, required: true },
@@ -311,6 +322,8 @@ function onPlay() {
         emit('trigger-motion', ev.name)
       }
     }
+  }, () => {
+    if (recorder.isRecording.value) recorder.stop()
   })
 }
 
@@ -320,6 +333,7 @@ function onPause() {
 }
 
 function onStop() {
+  if (recorder.isRecording.value) recorder.stop()
   if (audioEl) { audioEl.pause(); audioEl.currentTime = 0 }
   props.kf.stop()
   emit('apply-kf-values', props.kf.getAllValuesAtFrame(0, baseValues))
@@ -366,7 +380,8 @@ function eventBarStyle(ev) {
   if (ev.type === 'expression') {
     return { left: left + '%' }
   }
-  const width = ((ev.duration || 0) * props.kf.fps.value / props.kf.totalFrames.value) * 100
+  const dur = props.motionDurations?.[ev.name] || ev.duration || 2
+  const width = (dur * props.kf.fps.value / props.kf.totalFrames.value) * 100
   return { left: left + '%', width: Math.max(width, 2) + '%' }
 }
 
@@ -396,6 +411,19 @@ function addExpressionEvent(name) {
 
 function clearEvents() {
   props.kf.events.splice(0, props.kf.events.length)
+}
+
+function onRecordToggle() {
+  if (recorder.isRecording.value) {
+    recorder.stop()
+    onStop()
+    return
+  }
+  const cvs = document.getElementById('live2d-canvas')
+  if (!cvs) return
+  recorder.start(cvs, audioEl)
+  if (audioEl && audioEl.paused) audioEl.currentTime = props.kf.currentFrame.value / props.kf.fps.value
+  if (!props.kf.isPlaying.value) onPlay()
 }
 
 function onKeydown(e) {
@@ -516,8 +544,11 @@ function precision(step) {
   background: #f5a623; border: 2px solid #fff;
   border-radius: 50%; top: 5px; height: 8px; padding: 0; font-size: 0;
 }
-.bb-ev-close { flex-shrink: 0; }
-.bb-ev-clear { flex-shrink: 0; border-color: #e94560; color: #e94560; }
+.bb-ev-clear { flex-shrink: 0; font-size: 11px; }
+
+.bb-ev-footer {
+  padding: 2px 24px 2px 58px; flex-shrink: 0;
+}
 
 .bb-ev-picker {
   padding: 6px 24px 6px 58px; flex-shrink: 0;

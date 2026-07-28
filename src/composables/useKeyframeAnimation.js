@@ -226,7 +226,7 @@ export function useKeyframeAnimation() {
     goToFrame(totalFrames.value)
   }
 
-  function play(onTick) {
+  function play(onTick, onEnd) {
     if (isPlaying.value) return
     if (currentFrame.value >= totalFrames.value) {
       currentFrame.value = 0
@@ -234,6 +234,7 @@ export function useKeyframeAnimation() {
     isPlaying.value = true
     lastTimestamp = null
     tickCallback = onTick
+    let tickEndCb = onEnd
 
     function tick(timestamp) {
       if (!isPlaying.value) return
@@ -253,6 +254,7 @@ export function useKeyframeAnimation() {
           animFrameId = requestAnimationFrame(tick)
         } else {
           stop()
+          if (tickEndCb) tickEndCb()
         }
       } else {
         animFrameId = requestAnimationFrame(tick)
@@ -288,7 +290,9 @@ export function useKeyframeAnimation() {
       fps: fps.value,
       duration: duration.value,
       currentFrame: currentFrame.value,
+      isLooping: isLooping.value,
       keyframes: JSON.parse(JSON.stringify(keyframes)),
+      events: JSON.parse(JSON.stringify(events)),
     }
   }
 
@@ -297,6 +301,7 @@ export function useKeyframeAnimation() {
     if (data.fps != null) fps.value = data.fps
     if (data.duration != null) duration.value = data.duration
     if (data.currentFrame != null) currentFrame.value = data.currentFrame
+    if (data.isLooping != null) isLooping.value = data.isLooping
     if (data.keyframes) {
       for (const key of Object.keys(keyframes)) delete keyframes[key]
       for (const [paramKey, kfs] of Object.entries(data.keyframes)) {
@@ -305,6 +310,9 @@ export function useKeyframeAnimation() {
           easing: kf.easing || 'linear',
         }))
       }
+    }
+    if (data.events) {
+      events.splice(0, events.length, ...data.events)
     }
   }
 

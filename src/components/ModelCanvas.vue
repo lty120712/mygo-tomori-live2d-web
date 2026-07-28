@@ -94,7 +94,7 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.canvas-wrap { flex:1; position:relative; background:#0a0a1a; overflow:hidden; }
+.canvas-wrap { flex:1; position:relative; background:#0a0a1a url('/bg-character.png') center/cover no-repeat; overflow:hidden; }
 .canvas-wrap canvas { display:block; width:100%; height:100%; transition: none; }
 .canvas-info { position:absolute; top:12px; left:12px; background:rgba(0,0,0,.65); padding:8px 14px; border-radius:8px; font-size:13px; pointer-events:none; z-index:5; color:#eee; }
 .canvas-loading { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,.75); z-index:10; }

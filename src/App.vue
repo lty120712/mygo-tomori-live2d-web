@@ -26,7 +26,7 @@
         @set-param="onSetParam"
         @reset-group="resetGroup"
         @reset-all="resetAllParams"
-        @apply-kf-values="setAllParams"
+        @apply-kf-values="applyKfParams"
         @trigger-motion="playMotion"
         @trigger-expression="setExpression"
         @update:mouseTrackEnabled="v => mouseTrackEnabled = v"
@@ -60,7 +60,7 @@ const {
   models, currentModel, loading, statusText,
   motionGroups, currentMotion, expressionIds, currentExpression,
   paramValues, mouseTrackEnabled, motionPlaying, motionProgress, motionLabel, motionRemain, motionDurations, toastMsg,
-  loadModel, playMotion, setExpression, resetPose, setParam, resetGroup, resetAllParams, setAllParams,
+  loadModel, playMotion, setExpression, resetPose, setParam, resetGroup, resetAllParams, setAllParams, applyKfParams,
   applyMouseTrack, getSavedState,
 } = useModel()
 
@@ -80,7 +80,7 @@ function loadKfState() {
 }
 
 watch(
-  () => [kf.duration.value, kf.fps.value, kf.keyframes],
+  () => [kf.duration.value, kf.fps.value, kf.keyframes, kf.events],
   () => saveKfState(),
   { deep: true }
 )
