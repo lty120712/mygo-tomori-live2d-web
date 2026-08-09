@@ -26,23 +26,9 @@ const MODEL_LIST = [
   { category: 'tomori', name: 'live_sr_01' },
   { category: 'tomori', name: 'school_summer-2023' },
   { category: 'tomori', name: 'school_winter-2023' },
-  { category: 'anon', name: 'birthday_2024_ssr' },
-  { category: 'anon', name: 'casual-2023' },
-  { category: 'anon', name: 'collabo_a_ur' },
-  { category: 'anon', name: 'dream_festival_3_ur' },
-  { category: 'anon', name: 'live_default' },
-  { category: 'anon', name: 'live_event_235_ur' },
-  { category: 'anon', name: 'live_event_240_sr' },
-  { category: 'anon', name: 'live_event_250_r' },
   { category: 'anon', name: 'live_event_253_ur' },
   { category: 'anon', name: 'live_event_277_sr' },
-  { category: 'anon', name: 'live_event_286_sr' },
-  { category: 'anon', name: 'live_event_297_sr' },
-  { category: 'anon', name: 'live_event_307_ur' },
   { category: 'anon', name: 'live_event_313_ur' },
-  { category: 'anon', name: 'live_sr_01' },
-  { category: 'anon', name: 'school_summer-2023' },
-  { category: 'anon', name: 'school_winter-2023' },
 ]
 
 const models = MODEL_LIST
@@ -63,6 +49,8 @@ const motionRemain = ref('')
 const toastMsg = ref('')
 
 const motionDurations = ref({})
+
+const paramOverrides = reactive({})
 
 let toastTimer = null
 let progressTimer = null
@@ -184,7 +172,22 @@ function playMotion(g) {
 function setExpression(e) {
   if (!l2d) return
   currentExpression.value = e
+  for (const key of Object.keys(paramOverrides)) delete paramOverrides[key]
   l2d.setExpression(e)
+}
+
+function setParam(key, value) {
+  if (!(key in paramValues)) return
+  paramValues[key] = value
+  if (currentExpression.value) {
+    paramOverrides[key] = value
+  }
+  if (!l2d) return
+  if (currentExpression.value) {
+    l2d.setParams({ [key]: value })
+  } else {
+    applyAllParams()
+  }
 }
 
 async function resetPose() {
@@ -199,6 +202,7 @@ async function resetPose() {
   motionRemain.value = ''
   motionProgress.value = 0
   clearInterval(progressTimer)
+  for (const key of Object.keys(paramOverrides)) delete paramOverrides[key]
   const defaults = initParamValues()
   for (const key of Object.keys(defaults)) {
     paramValues[key] = defaults[key]
@@ -207,12 +211,6 @@ async function resetPose() {
   await l2d.load({ path: modelUrl + 'model.json', scale: 1.0 })
   motionGroups.value = Object.keys(l2d.getMotions())
   expressionIds.value = l2d.getExpressions()
-}
-
-function setParam(key, value) {
-  if (!(key in paramValues)) return
-  paramValues[key] = value
-  if (l2d) applyAllParams()
 }
 
 function resetGroup(groupKey) {
@@ -229,6 +227,7 @@ function resetAllParams() {
   for (const key of Object.keys(defaults)) {
     paramValues[key] = defaults[key]
   }
+  for (const key of Object.keys(paramOverrides)) delete paramOverrides[key]
   if (l2d) applyAllParams()
 }
 
@@ -264,10 +263,17 @@ function applyMouseTrack(x, y, cvs) {
   const cy = rect.height / 2
   const dx = (x - cx) / cx
   const dy = (y - cy) / cy
-  l2d.setParams({
-    PARAM_ANGLE_X: dy * 15,
-    PARAM_ANGLE_Y: dx * 15,
-  })
+  if (motionPlaying.value || currentExpression.value) {
+    const p = { ...paramOverrides }
+    p.PARAM_ANGLE_X = dy * 15
+    p.PARAM_ANGLE_Y = dx * 15
+    l2d.setParams(p)
+  } else {
+    const p = { ...paramValues }
+    p.PARAM_ANGLE_X = dy * 15
+    p.PARAM_ANGLE_Y = dx * 15
+    l2d.setParams(p)
+  }
 }
 
 function destroy() {
