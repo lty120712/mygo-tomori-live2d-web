@@ -106,7 +106,14 @@ function onCanvasMouse(x, y, cvs) {
 onMounted(() => {
   loadKfState()
   const saved = getSavedState()
-  loadModel(saved?.model || models[8], saved)
+  let defaultModel = models[8]
+  if (saved?.model) {
+    const parts = saved.model.split('/')
+    if (parts.length === 2) {
+      defaultModel = { category: parts[0], name: parts[1] }
+    }
+  }
+  loadModel(defaultModel, saved)
 })
 </script>
 

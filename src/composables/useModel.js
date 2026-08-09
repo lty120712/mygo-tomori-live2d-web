@@ -8,17 +8,46 @@ if (!L2D) {
   console.error('Live2D SDK not loaded')
 }
 
-const MODELS = [
-  "2024_furisode", "birthday_2024_ssr", "casual-2023",
-  "collabo_a_ur", "collabo_d_3_ur", "dream_festival_3_ur",
-  "live_default", "live_event_235_ur", "live_event_240_ssr",
-  "live_event_250_ur", "live_event_286_ur", "live_event_289_ur",
-  "live_event_297_ur", "live_event_307_ssr", "live_sr_01",
-  "school_summer-2023", "school_winter-2023"
+const MODEL_LIST = [
+  { category: 'tomori', name: '2024_furisode' },
+  { category: 'tomori', name: 'birthday_2024_ssr' },
+  { category: 'tomori', name: 'casual-2023' },
+  { category: 'tomori', name: 'collabo_a_ur' },
+  { category: 'tomori', name: 'collabo_d_3_ur' },
+  { category: 'tomori', name: 'dream_festival_3_ur' },
+  { category: 'tomori', name: 'live_default' },
+  { category: 'tomori', name: 'live_event_235_ur' },
+  { category: 'tomori', name: 'live_event_240_ssr' },
+  { category: 'tomori', name: 'live_event_250_ur' },
+  { category: 'tomori', name: 'live_event_286_ur' },
+  { category: 'tomori', name: 'live_event_289_ur' },
+  { category: 'tomori', name: 'live_event_297_ur' },
+  { category: 'tomori', name: 'live_event_307_ssr' },
+  { category: 'tomori', name: 'live_sr_01' },
+  { category: 'tomori', name: 'school_summer-2023' },
+  { category: 'tomori', name: 'school_winter-2023' },
+  { category: 'anon', name: 'birthday_2024_ssr' },
+  { category: 'anon', name: 'casual-2023' },
+  { category: 'anon', name: 'collabo_a_ur' },
+  { category: 'anon', name: 'dream_festival_3_ur' },
+  { category: 'anon', name: 'live_default' },
+  { category: 'anon', name: 'live_event_235_ur' },
+  { category: 'anon', name: 'live_event_240_sr' },
+  { category: 'anon', name: 'live_event_250_r' },
+  { category: 'anon', name: 'live_event_253_ur' },
+  { category: 'anon', name: 'live_event_277_sr' },
+  { category: 'anon', name: 'live_event_286_sr' },
+  { category: 'anon', name: 'live_event_297_sr' },
+  { category: 'anon', name: 'live_event_307_ur' },
+  { category: 'anon', name: 'live_event_313_ur' },
+  { category: 'anon', name: 'live_sr_01' },
+  { category: 'anon', name: 'school_summer-2023' },
+  { category: 'anon', name: 'school_winter-2023' },
 ]
 
-const models = MODELS
+const models = MODEL_LIST
 const currentModel = ref('')
+const currentCategory = ref('')
 const loading = ref(false)
 const statusText = ref('选择左侧模型加载')
 const motionGroups = ref([])
@@ -47,9 +76,27 @@ let l2d = null
 
 function setStatus(msg) { statusText.value = msg }
 
-async function loadModel(name, restore) {
+async function loadModel(m, restore) {
+  let name, category
+  if (typeof m === 'string') {
+    const parts = m.split('/')
+    if (parts.length === 2) {
+      category = parts[0]
+      name = parts[1]
+    } else {
+      category = 'tomori'
+      name = m
+    }
+  } else {
+    name = m?.name
+    category = m?.category || 'tomori'
+  }
+  if (!name) return
+  
   loading.value = true
   statusText.value = '加载中...'
+  currentModel.value = ''
+  currentCategory.value = ''
   currentMotion.value = ''
   currentExpression.value = ''
   motionGroups.value = []
@@ -87,14 +134,17 @@ async function loadModel(name, restore) {
     clearInterval(progressTimer)
   })
   try {
-    await l2d.load({ path: '/models/' + name + '/model.json', scale: 1.0 })
+    const modelUrl = '/models/' + category + '/' + name + '/'
+    await l2d.load({ path: modelUrl + 'model.json', scale: 1.0 })
   } catch (err) {
-    setStatus('加载失败: ' + name)
+    console.error('Model load error:', err)
+    setStatus('加载失败: ' + category + '/' + name)
     loading.value = false
     return
   }
-  currentModel.value = name
-  statusText.value = '当前: ' + name
+  currentModel.value = category + '/' + name
+  currentCategory.value = category
+  statusText.value = '当前: ' + category + '/' + name
 
   motionGroups.value = Object.keys(l2d.getMotions())
   expressionIds.value = l2d.getExpressions()
@@ -139,6 +189,9 @@ function setExpression(e) {
 
 async function resetPose() {
   if (!l2d || !currentModel.value) return
+  const parts = currentModel.value.split('/')
+  if (parts.length !== 2) return
+  const [category, name] = parts
   currentMotion.value = ''
   currentExpression.value = ''
   motionPlaying.value = false
@@ -150,8 +203,8 @@ async function resetPose() {
   for (const key of Object.keys(defaults)) {
     paramValues[key] = defaults[key]
   }
-  const name = currentModel.value
-  await l2d.load({ path: '/models/' + name + '/model.json', scale: 1.0 })
+  const modelUrl = '/models/' + category + '/' + name + '/'
+  await l2d.load({ path: modelUrl + 'model.json', scale: 1.0 })
   motionGroups.value = Object.keys(l2d.getMotions())
   expressionIds.value = l2d.getExpressions()
 }
@@ -254,6 +307,7 @@ export function useModel() {
   return {
     models,
     currentModel: readonly(currentModel),
+    currentCategory: readonly(currentCategory),
     loading: readonly(loading),
     statusText: readonly(statusText),
     motionGroups: readonly(motionGroups),
