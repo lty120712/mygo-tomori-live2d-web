@@ -26,9 +26,23 @@ const MODEL_LIST = [
   { category: 'tomori', name: 'live_sr_01' },
   { category: 'tomori', name: 'school_summer-2023' },
   { category: 'tomori', name: 'school_winter-2023' },
+  { category: 'anon', name: 'birthday_2024_ssr' },
+  { category: 'anon', name: 'casual-2023' },
+  { category: 'anon', name: 'collabo_a_ur' },
+  { category: 'anon', name: 'dream_festival_3_ur' },
+  { category: 'anon', name: 'live_default' },
+  { category: 'anon', name: 'live_event_235_ur' },
+  { category: 'anon', name: 'live_event_240_sr' },
+  { category: 'anon', name: 'live_event_250_r' },
   { category: 'anon', name: 'live_event_253_ur' },
   { category: 'anon', name: 'live_event_277_sr' },
+  { category: 'anon', name: 'live_event_286_sr' },
+  { category: 'anon', name: 'live_event_297_sr' },
+  { category: 'anon', name: 'live_event_307_ur' },
   { category: 'anon', name: 'live_event_313_ur' },
+  { category: 'anon', name: 'live_sr_01' },
+  { category: 'anon', name: 'school_summer-2023' },
+  { category: 'anon', name: 'school_winter-2023' },
 ]
 
 const models = MODEL_LIST
