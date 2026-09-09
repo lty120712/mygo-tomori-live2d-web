@@ -16,7 +16,7 @@
           :model-value="kf.fps.value"
           :min="1" :max="60" :step="1"
           size="mini" style="width:60px"
-          @change="v => kf.fps.value = v"
+          @change="v => kf.setFps(v)"
         />
       </div>
     </div>

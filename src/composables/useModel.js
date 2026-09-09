@@ -75,6 +75,7 @@ function showToast(msg) {
 }
 
 let l2d = null
+let loadRequestId = 0
 
 function setStatus(msg) { statusText.value = msg }
 
@@ -94,6 +95,14 @@ async function loadModel(m, restore) {
     category = m?.category || 'tomori'
   }
   if (!name) return
+
+  if (!L2D) {
+    setStatus('Live2D SDK 未加载')
+    loading.value = false
+    return
+  }
+
+  const requestId = ++loadRequestId
   
   loading.value = true
   statusText.value = '加载中...'
@@ -110,8 +119,9 @@ async function loadModel(m, restore) {
 
   const cvs = document.getElementById('live2d-canvas')
   if (!cvs) { loading.value = false; return }
-  l2d = L2D.init(cvs)
-  l2d.on('motionstart', (_group, _index, duration) => {
+  const instance = L2D.init(cvs)
+  l2d = instance
+  instance.on('motionstart', (_group, _index, duration) => {
     motionPlaying.value = true
     motionProgress.value = 0
     motionLabel.value = _group
@@ -128,7 +138,7 @@ async function loadModel(m, restore) {
       if (elapsed >= total) clearInterval(progressTimer)
     }, 50)
   })
-  l2d.on('motionend', () => {
+  instance.on('motionend', () => {
     motionPlaying.value = false
     motionProgress.value = 100
     motionRemain.value = '0.0s'
@@ -137,11 +147,17 @@ async function loadModel(m, restore) {
   })
   try {
     const modelUrl = '/models/' + category + '/' + name + '/'
-    await l2d.load({ path: modelUrl + 'model.json', scale: 1.0 })
+    await instance.load({ path: modelUrl + 'model.json', scale: 1.0 })
   } catch (err) {
+    if (requestId !== loadRequestId) return
     console.error('Model load error:', err)
     setStatus('加载失败: ' + category + '/' + name)
     loading.value = false
+    return
+  }
+  if (requestId !== loadRequestId) {
+    instance.destroy()
+    if (l2d === instance) l2d = null
     return
   }
   currentModel.value = category + '/' + name
@@ -222,7 +238,13 @@ async function resetPose() {
     paramValues[key] = defaults[key]
   }
   const modelUrl = '/models/' + category + '/' + name + '/'
-  await l2d.load({ path: modelUrl + 'model.json', scale: 1.0 })
+  try {
+    await l2d.load({ path: modelUrl + 'model.json', scale: 1.0 })
+  } catch (err) {
+    console.error('Model reset error:', err)
+    setStatus('复位失败: ' + currentModel.value)
+    return
+  }
   motionGroups.value = Object.keys(l2d.getMotions())
   expressionIds.value = l2d.getExpressions()
 }
@@ -291,6 +313,7 @@ function applyMouseTrack(x, y, cvs) {
 }
 
 function destroy() {
+  loadRequestId++
   clearInterval(progressTimer)
   clearTimeout(toastTimer)
   if (l2d) { l2d.destroy(); l2d = null }

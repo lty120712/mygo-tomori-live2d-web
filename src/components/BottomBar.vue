@@ -38,7 +38,7 @@
         :model-value="kf.fps.value"
         :min="1" :max="60" :step="1"
         size="mini" style="width:58px"
-        @update:model-value="v => kf.fps.value = v"
+        @update:model-value="v => kf.setFps(v)"
       />
       <a-divider direction="vertical" style="border-color:#0f3460;margin:0 6px" />
       <span class="bb-info">帧 <b>{{ Math.floor(kf.currentFrame.value) }}</b> / {{ kf.totalFrames.value }}</span>

@@ -48,7 +48,7 @@
 </template>
 
 <script setup>
-import { onMounted, watch } from 'vue'
+import { onMounted, onBeforeUnmount, watch } from 'vue'
 import { useModel } from './composables/useModel.js'
 import { useKeyframeAnimation } from './composables/useKeyframeAnimation.js'
 import ModelSidebar from './components/ModelSidebar.vue'
@@ -61,7 +61,7 @@ const {
   motionGroups, currentMotion, expressionIds, currentExpression,
   paramValues, mouseTrackEnabled, motionPlaying, motionProgress, motionLabel, motionRemain, motionDurations, toastMsg,
   loadModel, playMotion, setExpression, resetPose, setParam, resetGroup, resetAllParams, setAllParams, applyKfParams,
-  applyMouseTrack, getSavedState,
+  applyMouseTrack, getSavedState, destroy,
 } = useModel()
 
 const kf = useKeyframeAnimation()
@@ -114,6 +114,12 @@ onMounted(() => {
     }
   }
   loadModel(defaultModel, saved)
+})
+
+onBeforeUnmount(() => {
+  clearTimeout(saveKfTimer)
+  kf.stop()
+  destroy()
 })
 </script>
 

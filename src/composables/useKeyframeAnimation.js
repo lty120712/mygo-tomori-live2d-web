@@ -279,10 +279,19 @@ export function useKeyframeAnimation() {
   }
 
   function setDuration(val) {
-    duration.value = Math.max(0.1, val)
+    const next = Number(val)
+    if (!Number.isFinite(next)) return
+    duration.value = Math.max(0.1, next)
     if (currentFrame.value > totalFrames.value) {
       currentFrame.value = totalFrames.value
     }
+  }
+
+  function setFps(val) {
+    const next = Number(val)
+    if (!Number.isFinite(next)) return
+    fps.value = Math.max(1, Math.min(60, Math.round(next)))
+    if (currentFrame.value > totalFrames.value) currentFrame.value = totalFrames.value
   }
 
   function toJSON() {
@@ -298,21 +307,24 @@ export function useKeyframeAnimation() {
 
   function fromJSON(data) {
     if (!data) return
-    if (data.fps != null) fps.value = data.fps
-    if (data.duration != null) duration.value = data.duration
-    if (data.currentFrame != null) currentFrame.value = data.currentFrame
+    if (data.fps != null) setFps(data.fps)
+    if (data.duration != null) setDuration(data.duration)
+    if (data.currentFrame != null && Number.isFinite(Number(data.currentFrame))) {
+      currentFrame.value = Math.max(0, Math.min(totalFrames.value, Number(data.currentFrame)))
+    }
     if (data.isLooping != null) isLooping.value = data.isLooping
-    if (data.keyframes) {
+    if (data.keyframes && typeof data.keyframes === 'object') {
       for (const key of Object.keys(keyframes)) delete keyframes[key]
       for (const [paramKey, kfs] of Object.entries(data.keyframes)) {
-        keyframes[paramKey] = kfs.map(kf => ({
-          ...kf,
-          easing: kf.easing || 'linear',
-        }))
+        if (!Array.isArray(kfs)) continue
+        keyframes[paramKey] = kfs
+          .filter(kf => Number.isFinite(Number(kf?.frame)) && Number.isFinite(Number(kf?.value)))
+          .map(kf => ({ ...kf, frame: Math.max(0, Math.min(totalFrames.value, Math.round(Number(kf.frame)))), value: Number(kf.value), easing: EASING_TYPES.includes(kf.easing) ? kf.easing : 'linear' }))
+          .sort((a, b) => a.frame - b.frame)
       }
     }
-    if (data.events) {
-      events.splice(0, events.length, ...data.events)
+    if (Array.isArray(data.events)) {
+      events.splice(0, events.length, ...data.events.filter(e => e && Number.isFinite(Number(e.frame)) && typeof e.name === 'string').map(e => ({ ...e, frame: Math.max(0, Math.min(totalFrames.value, Math.round(Number(e.frame)))), duration: Math.max(0, Number(e.duration) || 0) })))
     }
   }
 
@@ -332,7 +344,7 @@ export function useKeyframeAnimation() {
     getAllKeyframedParams, getAllKeyframes, getUniqueFramePositions,
     goToFrame, goToStart, goToEnd,
     goToPrevKeyframe, goToNextKeyframe,
-    play, pause, stop, setDuration,
+    play, pause, stop, setDuration, setFps,
     toJSON, fromJSON, clearAll,
     events, canAddMotionEvent, addEvent, removeEvent, getActiveEventsAtFrame,
   }
