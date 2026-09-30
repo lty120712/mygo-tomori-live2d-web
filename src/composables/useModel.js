@@ -1,7 +1,7 @@
 import { ref, reactive, readonly, watch } from 'vue'
 import { init as createL2D } from 'l2d'
 import { PARAM_GROUPS, initParamValues } from '../params.js'
-import { collectMotionDurations } from '../motions.js'
+import { collectMotionInfo } from '../motions.js'
 import modelManifest from 'virtual:model-manifest'
 
 const STORAGE_KEY = 'tomori-viewer-state'
@@ -27,6 +27,38 @@ const toastMsg = ref('')
 const motionDurations = ref({})
 
 const paramOverrides = reactive({})
+
+// 当前模型实际拥有的参数 id 集合。
+// 老模型用 PARAM_EYE_L_OPEN 这类命名，新模型（adv 系列）用 ParamEyeLOpen，
+// 直接下发不存在的 id 会每帧去写一个无效参数，所以下发前先过滤。
+let validParamIds = null
+
+function refreshValidParamIds() {
+  validParamIds = null
+  if (!l2d) return
+  try {
+    const list = l2d.getParams()
+    if (Array.isArray(list) && list.length > 0) {
+      validParamIds = new Set(list.map(item => item.id))
+    }
+  } catch {
+    // 拿不到参数表就不过滤，保持原来的行为
+  }
+}
+
+function filterParams(params) {
+  if (!validParamIds) return { ...params }
+  const result = {}
+  for (const [key, value] of Object.entries(params)) {
+    if (validParamIds.has(key)) result[key] = value
+  }
+  return result
+}
+
+function sendParams(params) {
+  if (!l2d) return
+  l2d.setParams(filterParams(params))
+}
 
 // 人物缩放，单位是百分比（100 = 原始大小）。
 // 只作用于模型视图矩阵，背景不受影响。
@@ -135,7 +167,7 @@ function applySdkMouseTracking() {
     // 先发事件再摘监听，不然 SDK 收不到这个信号。
     try {
       document.dispatchEvent(new MouseEvent('mouseout'))
-      l2d.setParams({ PARAM_ANGLE_X: 0, PARAM_ANGLE_Y: 0 })
+      sendParams({ PARAM_ANGLE_X: 0, PARAM_ANGLE_Y: 0 })
     } catch {
       // 个别环境构造事件或设置参数失败都无所谓，不能因此让开关失效
     }
@@ -163,6 +195,9 @@ function ensureInstance(cvs) {
     motionProgress.value = 0
     motionLabel.value = _group
     motionDurations.value = { ...motionDurations.value, [_group]: duration }
+    // 动作播放期间只保留表情覆盖值：否则之前强制过的整套参数每帧都会把面部写回，
+    // 动作自带的表情变化就看不出来了
+    sendParams({ ...paramOverrides })
     clearInterval(progressTimer)
     const start = Date.now()
     const total = duration * 1000 || 2000
@@ -181,6 +216,8 @@ function ensureInstance(cvs) {
     motionRemain.value = '0.0s'
     motionLabel.value = ''
     clearInterval(progressTimer)
+    // 动作结束，把参数控制权还给用户设定
+    applyForcedParams()
   })
   l2d = instance
   return instance
@@ -188,10 +225,21 @@ function ensureInstance(cvs) {
 
 // 动作时长直接从动作文件里读，不必等用户先把每个动作播一遍。
 // 播放时 SDK 通过 motionstart 给的真实值优先级更高，会覆盖这里的值。
-async function harvestMotionDurations(modelUrl, requestId) {
+// 记录哪些动作自带表情。adv 系列的动作不带表情（表情是独立的 exp 资源），
+// 播放时需要自动补上同名表情，否则只有身体在动。
+let motionCarriesExpression = {}
+
+async function harvestMotionInfo(modelUrl, requestId) {
   if (!l2d) return
-  const durations = await collectMotionDurations(modelUrl, l2d.getMotions())
+  const info = await collectMotionInfo(modelUrl, l2d.getMotions())
   if (requestId !== loadRequestId) return
+  const durations = {}
+  const carries = {}
+  for (const [group, item] of Object.entries(info)) {
+    if (typeof item.seconds === 'number') durations[group] = item.seconds
+    carries[group] = !!item.carriesExpression
+  }
+  motionCarriesExpression = carries
   motionDurations.value = { ...durations, ...motionDurations.value }
 }
 
@@ -230,6 +278,7 @@ async function loadModel(m, restore) {
   motionGroups.value = []
   expressionIds.value = []
   motionDurations.value = {}
+  motionCarriesExpression = {}
 
   const cvs = document.getElementById('live2d-canvas')
   if (!cvs) { loading.value = false; return }
@@ -251,13 +300,15 @@ async function loadModel(m, restore) {
   l2d.resize()
   // 模型加载会重建 SDK 内部的渲染委托，跟随监听要按当前开关重新对齐
   applySdkMouseTracking()
+  // 参数命名各代模型不同，先取当前模型的参数表，后面下发时据此过滤
+  refreshValidParamIds()
   currentModel.value = category + '/' + name
   currentCategory.value = category
   statusText.value = '当前: ' + category + '/' + name
 
   motionGroups.value = Object.keys(l2d.getMotions())
   expressionIds.value = l2d.getExpressions()
-  harvestMotionDurations(modelUrl, requestId)
+  harvestMotionInfo(modelUrl, requestId)
 
   if (restore) {
     if (restore.motion && motionGroups.value.includes(restore.motion)) {
@@ -281,6 +332,25 @@ async function loadModel(m, restore) {
   loading.value = false
 }
 
+/** mtn_angry01_C -> angry01，用于找配套表情 */
+function normalizeMotionName(name) {
+  return String(name).replace(/^mtn_/i, '').replace(/_[clr]$/i, '')
+}
+
+/** exp_angry01.exp3 -> angry01 */
+function expressionBaseName(id) {
+  return String(id).replace(/\.exp3?$/i, '').replace(/^exp_/i, '')
+}
+
+function findPairedExpression(motionName) {
+  const list = expressionIds.value || []
+  if (list.length === 0) return null
+  const target = normalizeMotionName(motionName)
+  return list.find(id => id === target) ||
+    list.find(id => expressionBaseName(id) === target) ||
+    null
+}
+
 function playMotion(g) {
   if (!l2d) return
   if (motionPlaying.value) {
@@ -289,6 +359,12 @@ function playMotion(g) {
   }
   currentMotion.value = g
   l2d.playMotion(g)
+  // adv 系列的动作不带面部表情（表情是独立的 exp 资源），自动套上同名表情，
+  // 否则只会看到身体在动、脸一直是上一张
+  if (!motionCarriesExpression[g]) {
+    const paired = findPairedExpression(g)
+    if (paired) setExpression(paired)
+  }
 }
 
 function setExpression(e) {
@@ -296,6 +372,8 @@ function setExpression(e) {
   currentExpression.value = e
   for (const key of Object.keys(paramOverrides)) delete paramOverrides[key]
   l2d.setExpression(e)
+  // 同理：让表情自己驱动面部，只保留用户手动改过的参数
+  applyForcedParams()
 }
 
 function setParam(key, value) {
@@ -306,7 +384,7 @@ function setParam(key, value) {
   }
   if (!l2d) return
   if (currentExpression.value) {
-    l2d.setParams({ [key]: value })
+    sendParams({ [key]: value })
   } else {
     applyAllParams()
   }
@@ -341,6 +419,7 @@ async function resetPose() {
   motionGroups.value = Object.keys(l2d.getMotions())
   expressionIds.value = l2d.getExpressions()
   applySdkMouseTracking()
+  refreshValidParamIds()
 }
 
 function resetGroup(groupKey) {
@@ -363,7 +442,20 @@ function resetAllParams() {
 
 function applyAllParams() {
   if (!l2d) return
-  l2d.setParams({ ...paramValues })
+  sendParams({ ...paramValues })
+}
+
+/**
+ * 决定此刻要把哪些参数强制写回模型。
+ *
+ * SDK 的 setParams 是"整组覆盖"，被覆盖的参数每帧都会在动作更新之后写回，
+ * 因此动作一旦播放，之前下发的整套参数会把它自带的面部变化全部压住。
+ * 有表情时只强制用户改过的那几个参数，其余交给表情和动作。
+ */
+function applyForcedParams() {
+  if (!l2d) return
+  if (currentExpression.value) sendParams({ ...paramOverrides })
+  else applyAllParams()
 }
 
 function setAllParams(values) {
@@ -382,7 +474,7 @@ function applyKfParams(values) {
     }
   }
   if (l2d && Object.keys(values).length > 0) {
-    l2d.setParams({ ...values })
+    sendParams({ ...values })
   }
 }
 
@@ -397,12 +489,12 @@ function applyMouseTrack(x, y, cvs) {
     const p = { ...paramOverrides }
     p.PARAM_ANGLE_X = dy * 15
     p.PARAM_ANGLE_Y = dx * 15
-    l2d.setParams(p)
+    sendParams(p)
   } else {
     const p = { ...paramValues }
     p.PARAM_ANGLE_X = dy * 15
     p.PARAM_ANGLE_Y = dx * 15
-    l2d.setParams(p)
+    sendParams(p)
   }
 }
 
