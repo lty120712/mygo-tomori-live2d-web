@@ -254,6 +254,26 @@
       <a-button size="small" type="outline" style="border-color:#e94560;color:#e94560" @click="$emit('reset-all')">全部复位</a-button>
       <span class="bb-label">鼠标跟随</span>
       <a-switch size="small" :model-value="mouseTrackEnabled" @change="$emit('update:mouseTrackEnabled', $event)" />
+      <a-divider direction="vertical" style="border-color:#0f3460;margin:0 6px" />
+      <span class="bb-label">背景</span>
+      <a-color-picker
+        :model-value="background.color"
+        size="mini"
+        :disabled="recorder.isRecording.value"
+        @change="setColor"
+      />
+      <input ref="bgInputRef" type="file" accept="image/*" style="display:none" @change="onBgSelected" />
+      <a-button size="mini" :disabled="recorder.isRecording.value" @click="bgInputRef.click()">上传图片</a-button>
+      <template v-if="background.image">
+        <span class="bb-info" :title="background.imageName">{{ background.imageName || '自定义图片' }}</span>
+        <a-button size="mini" :disabled="recorder.isRecording.value" @click="clearImage">清除图片</a-button>
+      </template>
+      <a-button
+        size="mini"
+        :disabled="recorder.isRecording.value"
+        title="清除图片并恢复默认绿幕"
+        @click="reset"
+      >重置背景</a-button>
       <div v-if="motionLabel" class="bb-motion-info">
         <span class="bb-motion-name">{{ motionLabel }}</span>
         <a-progress :percent="motionProgress / 100" size="small" color="#e94560" :show-text="false" style="width:100px" />
@@ -268,9 +288,12 @@ import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { PARAM_GROUPS, initParamValues } from '../params.js'
 import { useRecorder } from '../composables/useRecorder.js'
 import { ESTIMATED_MOTION_SECONDS, formatSeconds } from '../motions.js'
+import { useBackground } from '../composables/useBackground.js'
 
 const recorder = useRecorder()
+const { background, setColor, setImageFile, clearImage, reset } = useBackground()
 const projectInputRef = ref(null)
+const bgInputRef = ref(null)
 const hintMsg = ref('')
 let hintTimer = null
 
@@ -717,6 +740,20 @@ function onProjectSelected(e) {
   reader.readAsText(file)
 }
 
+/* ---------- 录制背景 ---------- */
+
+async function onBgSelected(e) {
+  const file = e.target.files?.[0]
+  e.target.value = ''
+  if (!file) return
+  if (!file.type.startsWith('image/')) {
+    showHint('请选择图片文件')
+    return
+  }
+  const result = await setImageFile(file)
+  if (!result.ok) showHint('图片已应用，但没能保存下来（可能超出浏览器存储上限），刷新后会丢失')
+}
+
 function onRecordToggle() {
   if (recorder.isRecording.value) {
     recorder.stop()
@@ -725,7 +762,7 @@ function onRecordToggle() {
   }
   const cvs = document.getElementById('live2d-canvas')
   if (!cvs) return
-  if (!recorder.start(cvs, audioEl, props.recordMode)) {
+  if (!recorder.start(cvs, audioEl, props.recordMode, () => background.value)) {
     showHint('录制启动失败，请检查浏览器权限')
     return
   }
@@ -939,7 +976,7 @@ function precision(step) {
 /* Footer */
 .bb-footer {
   display: flex; align-items: center; padding: 4px 12px;
-  border-top: 1px solid #0f3460; gap: 10px; flex-shrink: 0;
+  border-top: 1px solid #0f3460; gap: 10px; flex-shrink: 0; flex-wrap: wrap;
 }
 .bb-motion-info {
   display: flex; align-items: center; gap: 6px; margin-left: auto;

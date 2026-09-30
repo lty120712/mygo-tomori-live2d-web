@@ -11,6 +11,7 @@
         :loading="loading"
         :mouseTrackEnabled="mouseTrackEnabled"
         :recordMode="recordMode"
+        :background="background"
         @mouse-move="onCanvasMouse"
       />
       <div class="canvas-sep"></div>
@@ -54,6 +55,7 @@
 import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { useModel } from './composables/useModel.js'
 import { useKeyframeAnimation } from './composables/useKeyframeAnimation.js'
+import { useBackground } from './composables/useBackground.js'
 import ModelSidebar from './components/ModelSidebar.vue'
 import ModelCanvas from './components/ModelCanvas.vue'
 import RightPanel from './components/RightPanel.vue'
@@ -73,6 +75,9 @@ const KF_STORAGE_KEY = 'tomori-kf-state'
 
 // 导出比例：canvas = 跟随画布，portrait = 竖屏 9:16
 const recordMode = ref('canvas')
+
+// 录制背景：默认绿幕，可换颜色或上传图片，设置会持久化
+const { background, init: initBackground, destroy: destroyBackground } = useBackground()
 
 function saveKfState() {
   try {
@@ -115,6 +120,7 @@ function onCanvasMouse(x, y, cvs) {
 
 onMounted(() => {
   loadKfState()
+  initBackground()
   const saved = getSavedState()
   let defaultModel = models.find(m => m.category === 'tomori' && m.name === 'live_default') || models[0]
   if (saved?.model) {
@@ -129,6 +135,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   clearTimeout(saveKfTimer)
   kf.stop()
+  destroyBackground()
   destroy()
 })
 </script>

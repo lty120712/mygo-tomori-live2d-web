@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { DEFAULT_BG_COLOR } from '../background.js'
 
 /** 导出视频的帧率 */
 const RECORD_FPS = 30
@@ -32,12 +33,34 @@ export function useRecorder() {
   let audioCtx = null
   let audioDest = null
   let bgImage = null
+  let bgImageSrc = ''
+  let readBackground = null
   let mode = 'canvas'
 
-  function loadBg() {
-    if (bgImage) return
-    bgImage = new Image()
-    bgImage.src = '/bg-character.png'
+  /** 背景图换了才重建，避免每帧都创建 Image */
+  function syncBgImage(src) {
+    if (src === bgImageSrc) return
+    bgImageSrc = src
+    if (!src) {
+      bgImage = null
+      return
+    }
+    const img = new Image()
+    img.src = src
+    bgImage = img
+  }
+
+  /**
+   * 铺背景：有图就拉伸铺满（用户要求按画布大小拉伸），否则填纯色。
+   * 绿幕抠像用的就是这条路。
+   */
+  function paintBackground(ctx, width, height) {
+    if (bgImage && bgImage.complete && bgImage.naturalWidth) {
+      ctx.drawImage(bgImage, 0, 0, width, height)
+      return
+    }
+    ctx.fillStyle = (readBackground && readBackground()?.color) || DEFAULT_BG_COLOR
+    ctx.fillRect(0, 0, width, height)
   }
 
   function setupAudio(audioEl) {
@@ -69,24 +92,6 @@ export function useRecorder() {
     return { width: toEven(sw * scale), height: toEven(sh * scale) }
   }
 
-  function drawCoverImage(ctx, img, width, height) {
-    const imgRatio = img.naturalWidth / img.naturalHeight
-    const outRatio = width / height
-    let dw, dh, dx, dy
-    if (imgRatio > outRatio) {
-      dh = height
-      dw = height * imgRatio
-      dx = (width - dw) / 2
-      dy = 0
-    } else {
-      dw = width
-      dh = width / imgRatio
-      dx = 0
-      dy = (height - dh) / 2
-    }
-    ctx.drawImage(img, dx, dy, dw, dh)
-  }
-
   function drawFrame(sourceCanvas) {
     if (!outCtx || !outCvs) return
     const sw = sourceCanvas.width
@@ -96,12 +101,9 @@ export function useRecorder() {
     const outW = outCvs.width
     const outH = outCvs.height
 
-    outCtx.fillStyle = '#0a0a1a'
-    outCtx.fillRect(0, 0, outW, outH)
-
-    if (bgImage && bgImage.complete && bgImage.naturalWidth) {
-      drawCoverImage(outCtx, bgImage, outW, outH)
-    }
+    const bg = (readBackground && readBackground()) || {}
+    syncBgImage(bg.image || '')
+    paintBackground(outCtx, outW, outH)
 
     if (mode === 'portrait') {
       // 裁切到目标比例后再缩放，保证模型不被拉伸变形
@@ -135,11 +137,11 @@ export function useRecorder() {
     setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 
-  function start(sourceCanvas, audioEl, nextMode = 'canvas') {
+  function start(sourceCanvas, audioEl, nextMode = 'canvas', getBackground = null) {
     if (!canRecord.value || isRecording.value || !sourceCanvas) return false
 
     mode = nextMode === 'portrait' ? 'portrait' : 'canvas'
-    loadBg()
+    readBackground = typeof getBackground === 'function' ? getBackground : null
     setupAudio(audioEl)
 
     const size = resolveOutputSize(sourceCanvas, mode)

@@ -6,7 +6,7 @@
     @mousemove="onDragMove"
     @mouseup="onDragEnd"
     @mouseleave="onDragEnd"
-    :style="{ cursor: dragging ? 'grabbing' : 'grab' }"
+    :style="[wrapStyle, { cursor: dragging ? 'grabbing' : 'grab' }]"
   >
     <canvas
       id="live2d-canvas"
@@ -25,13 +25,15 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { resolveBgColor } from '../background.js'
 
 const props = defineProps({
   statusText: { type: String, default: '' },
   loading: { type: Boolean, default: false },
   mouseTrackEnabled: { type: Boolean, default: true },
   recordMode: { type: String, default: 'canvas' },
+  background: { type: Object, default: () => ({ color: '#00b140', image: null }) },
 })
 
 const emit = defineEmits(['mouse-move'])
@@ -39,6 +41,20 @@ const emit = defineEmits(['mouse-move'])
 const wrapRef = ref(null)
 const canvasRef = ref(null)
 const dx = ref(0)
+
+// 背景与录制保持一致：图片拉伸铺满，否则纯色填充
+const wrapStyle = computed(() => {
+  const bg = props.background || {}
+  const color = resolveBgColor(bg)
+  if (!bg.image) return { backgroundColor: color, backgroundImage: 'none' }
+  return {
+    backgroundColor: color,
+    backgroundImage: 'url("' + bg.image + '")',
+    backgroundSize: '100% 100%',
+    backgroundRepeat: 'no-repeat',
+    backgroundPosition: 'center',
+  }
+})
 const dy = ref(0)
 const dragging = ref(false)
 let dragStartX = 0
@@ -144,7 +160,7 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.canvas-wrap { flex:1; position:relative; background:#0a0a1a url('/bg-character.png') center/cover no-repeat; overflow:hidden; }
+.canvas-wrap { flex:1; position:relative; background-color:#00b140; overflow:hidden; }
 .canvas-wrap canvas { display:block; width:100%; height:100%; transition: none; }
 .canvas-info { position:absolute; top:12px; left:12px; background:rgba(0,0,0,.65); padding:8px 14px; border-radius:8px; font-size:13px; pointer-events:none; z-index:5; color:#eee; }
 .canvas-loading { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,.75); z-index:10; }
