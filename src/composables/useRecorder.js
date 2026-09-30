@@ -35,6 +35,7 @@ export function useRecorder() {
   let bgImage = null
   let bgImageSrc = ''
   let readBackground = null
+  let readViewRect = null
   let mode = 'canvas'
 
   /** 背景图换了才重建，避免每帧都创建 Image */
@@ -82,21 +83,41 @@ export function useRecorder() {
    * - canvas：跟随画布比例，所见即所得
    * - portrait：固定 9:16，画面中心裁切后铺满
    */
-  function resolveOutputSize(sourceCanvas, nextMode) {
+  function resolveOutputSize(sourceWidth, sourceHeight, nextMode) {
     if (nextMode === 'portrait') {
       return { width: PORTRAIT_W, height: PORTRAIT_H }
     }
-    const sw = sourceCanvas.width || PORTRAIT_W
-    const sh = sourceCanvas.height || PORTRAIT_H
+    const sw = sourceWidth || PORTRAIT_W
+    const sh = sourceHeight || PORTRAIT_H
     const scale = Math.min(1, MAX_LONG_EDGE / Math.max(sw, sh))
     return { width: toEven(sw * scale), height: toEven(sh * scale) }
   }
 
+  /**
+   * 画面放大后画布会比可视区大，录制的应当是可视区那一块，
+   * 否则放大 / 拖动之后就录不到眼睛看到的构图。
+   */
+  function viewWindow(sourceCanvas) {
+    const cvsW = sourceCanvas.width
+    const cvsH = sourceCanvas.height
+    const view = readViewRect && readViewRect()
+    if (!view || !(view.sw > 0) || !(view.sh > 0)) {
+      return { sx: 0, sy: 0, sw: cvsW, sh: cvsH }
+    }
+    const sw = Math.min(cvsW, Math.round(view.sw))
+    const sh = Math.min(cvsH, Math.round(view.sh))
+    return {
+      sx: Math.max(0, Math.min(cvsW - sw, Math.round(view.sx))),
+      sy: Math.max(0, Math.min(cvsH - sh, Math.round(view.sy))),
+      sw,
+      sh,
+    }
+  }
+
   function drawFrame(sourceCanvas) {
     if (!outCtx || !outCvs) return
-    const sw = sourceCanvas.width
-    const sh = sourceCanvas.height
-    if (!sw || !sh) return
+    const win = viewWindow(sourceCanvas)
+    if (!win.sw || !win.sh) return
 
     const outW = outCvs.width
     const outH = outCvs.height
@@ -108,13 +129,13 @@ export function useRecorder() {
     if (mode === 'portrait') {
       // 裁切到目标比例后再缩放，保证模型不被拉伸变形
       const targetRatio = outW / outH
-      const cropW = Math.min(sw, sh * targetRatio)
-      const cropH = Math.min(sh, sw / targetRatio)
-      const sx = (sw - cropW) / 2
-      const sy = (sh - cropH) / 2
+      const cropW = Math.min(win.sw, win.sh * targetRatio)
+      const cropH = Math.min(win.sh, win.sw / targetRatio)
+      const sx = win.sx + (win.sw - cropW) / 2
+      const sy = win.sy + (win.sh - cropH) / 2
       outCtx.drawImage(sourceCanvas, sx, sy, cropW, cropH, 0, 0, outW, outH)
     } else {
-      outCtx.drawImage(sourceCanvas, 0, 0, sw, sh, 0, 0, outW, outH)
+      outCtx.drawImage(sourceCanvas, win.sx, win.sy, win.sw, win.sh, 0, 0, outW, outH)
     }
   }
 
@@ -137,14 +158,16 @@ export function useRecorder() {
     setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 
-  function start(sourceCanvas, audioEl, nextMode = 'canvas', getBackground = null) {
+  function start(sourceCanvas, audioEl, nextMode = 'canvas', getBackground = null, getViewRect = null) {
     if (!canRecord.value || isRecording.value || !sourceCanvas) return false
 
     mode = nextMode === 'portrait' ? 'portrait' : 'canvas'
     readBackground = typeof getBackground === 'function' ? getBackground : null
+    readViewRect = typeof getViewRect === 'function' ? getViewRect : null
     setupAudio(audioEl)
 
-    const size = resolveOutputSize(sourceCanvas, mode)
+    const win = viewWindow(sourceCanvas)
+    const size = resolveOutputSize(win.sw, win.sh, mode)
     outCvs = document.createElement('canvas')
     outCvs.width = size.width
     outCvs.height = size.height

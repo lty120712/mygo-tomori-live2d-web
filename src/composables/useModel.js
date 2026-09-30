@@ -28,6 +28,22 @@ const motionDurations = ref({})
 
 const paramOverrides = reactive({})
 
+// 人物缩放，单位是百分比（100 = 原始大小）。
+// 只作用于模型视图矩阵，背景不受影响。
+const MODEL_SCALE_MIN = 10
+const MODEL_SCALE_MAX = 500
+const modelScale = ref(100)
+
+function clampScale(value) {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return 100
+  return Math.min(MODEL_SCALE_MAX, Math.max(MODEL_SCALE_MIN, Math.round(numeric)))
+}
+
+function setModelScale(percent) {
+  modelScale.value = clampScale(percent)
+}
+
 let toastTimer = null
 let progressTimer = null
 function showToast(msg) {
@@ -195,6 +211,9 @@ async function loadModel(m, restore) {
     category = m?.category || 'tomori'
   }
   if (!name) return
+
+  // 缩放要在 load 之前定好：load 会按传入的 scale 重置视图
+  if (restore && restore.scale != null) modelScale.value = clampScale(restore.scale)
 
   const entry = (m && typeof m === 'object' && m.entry)
     || modelEntryMap.get(category + '/' + name)
@@ -406,6 +425,7 @@ function saveState() {
       expression: currentExpression.value,
       params: { ...paramValues },
       mouseTrack: mouseTrackEnabled.value,
+      scale: modelScale.value,
     }))
   } catch {
     // Storage can be unavailable or full; keep the viewer responsive.
@@ -425,7 +445,7 @@ function debouncedSave() {
   saveTimer = setTimeout(saveState, 500)
 }
 
-watch([currentModel, currentMotion, currentExpression, mouseTrackEnabled, paramValues], () => {
+watch([currentModel, currentMotion, currentExpression, mouseTrackEnabled, modelScale, paramValues], () => {
   if (currentModel.value) debouncedSave()
 }, { deep: true })
 
@@ -463,5 +483,7 @@ export function useModel() {
     destroy,
     setStatus,
     getSavedState,
+    modelScale: readonly(modelScale),
+    setModelScale,
   }
 }

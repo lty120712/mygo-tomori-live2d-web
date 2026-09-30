@@ -275,6 +275,35 @@
         title="清除图片并恢复默认绿幕"
         @click="reset"
       >重置背景</a-button>
+      <a-divider direction="vertical" style="border-color:#0f3460;margin:0 6px" />
+      <span class="bb-label">人物</span>
+      <a-select
+        :model-value="scale"
+        size="mini"
+        style="width:88px"
+        :disabled="recorder.isRecording.value"
+        title="人物缩放，不影响背景"
+        @change="v => $emit('update:scale', v)"
+      >
+        <a-option v-for="p in SCALE_PRESETS" :key="p" :value="p">{{ p }}%</a-option>
+      </a-select>
+      <a-slider
+        :model-value="scale"
+        :min="10" :max="500" :step="5"
+        :disabled="recorder.isRecording.value"
+        style="width:110px;flex-shrink:0;margin:0 4px"
+        @change="v => $emit('update:scale', v)"
+      />
+      <a-input-number
+        :model-value="scale"
+        :min="10" :max="500" :step="5"
+        :hide-button="true"
+        size="mini"
+        style="width:66px"
+        :disabled="recorder.isRecording.value"
+        @change="v => v != null && $emit('update:scale', v)"
+      />
+      <span class="bb-label">%</span>
       <div v-if="motionLabel" class="bb-motion-info">
         <span class="bb-motion-name">{{ motionLabel }}</span>
         <a-progress :percent="motionProgress / 100" size="small" color="#e94560" :show-text="false" style="width:100px" />
@@ -293,6 +322,8 @@ import { useBackground } from '../composables/useBackground.js'
 
 const recorder = useRecorder()
 const { background, setColor, setImageFile, clearImage, reset } = useBackground()
+
+const SCALE_PRESETS = [50, 100, 125, 150, 200, 300]
 const projectInputRef = ref(null)
 const bgInputRef = ref(null)
 const hintMsg = ref('')
@@ -316,9 +347,11 @@ const props = defineProps({
   motionRemain: { type: String, default: '' },
   motionPlaying: { type: Boolean, default: false },
   recordMode: { type: String, default: 'canvas' },
+  scale: { type: Number, default: 100 },
+  getViewRect: { type: Function, default: null },
 })
 
-const emit = defineEmits(['set-param', 'reset-group', 'reset-all', 'reset-view', 'update:mouseTrackEnabled', 'update:recordMode', 'apply-kf-values', 'trigger-motion', 'trigger-expression'])
+const emit = defineEmits(['set-param', 'reset-group', 'reset-all', 'reset-view', 'update:mouseTrackEnabled', 'update:recordMode', 'update:scale', 'apply-kf-values', 'trigger-motion', 'trigger-expression'])
 
 const groups = PARAM_GROUPS
 const baseValues = initParamValues()
@@ -763,7 +796,7 @@ function onRecordToggle() {
   }
   const cvs = document.getElementById('live2d-canvas')
   if (!cvs) return
-  if (!recorder.start(cvs, audioEl, props.recordMode, () => background.value)) {
+  if (!recorder.start(cvs, audioEl, props.recordMode, () => background.value, props.getViewRect)) {
     showHint('录制启动失败，请检查浏览器权限')
     return
   }

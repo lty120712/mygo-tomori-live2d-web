@@ -31,6 +31,7 @@ const props = defineProps({
   mouseTrackEnabled: { type: Boolean, default: true },
   recordMode: { type: String, default: 'canvas' },
   background: { type: Object, default: () => ({ color: '#00b140', image: null }) },
+  scale: { type: Number, default: 100 },
 })
 
 const emit = defineEmits(['mouse-move'])
@@ -60,6 +61,11 @@ let baseDx = 0
 let baseDy = 0
 let resizeObserver = null
 
+const scaleFactor = computed(() => {
+  const k = Number(props.scale) / 100
+  return Number.isFinite(k) && k > 0 ? Math.min(5, Math.max(0.1, k)) : 1
+})
+
 // 竖屏导出按 9:16 居中裁切，这里把裁切范围画出来，
 // 否则切换比例后屏幕上毫无变化，根本看不出选了什么
 const guideStyle = ref(null)
@@ -73,13 +79,49 @@ function liveCanvas() {
 }
 
 function syncCanvasSize() {
+  const wrap = wrapRef.value
   const cvs = liveCanvas()
-  if (!cvs) return
-  // SDK 会把第一次加载模型时的像素尺寸写进内联样式并固定下来，
-  // 这里覆盖成百分比，保证窗口或面板尺寸变化后画布仍然铺满容器。
-  cvs.style.width = '100%'
-  cvs.style.height = '100%'
+  if (!wrap || !cvs) return
+  // 画布要比可视区大：放大人物时模型仍完整画在画布里，
+  // 超出可视区的部分靠拖动平移查看，而不是被裁掉。
+  // 同时 SDK 会把第一次加载时的像素尺寸写死在内联样式上，这里每次都覆盖。
+  const k = scaleFactor.value
+  const w = Math.max(1, Math.round(wrap.clientWidth * k))
+  const h = Math.max(1, Math.round(wrap.clientHeight * k))
+  cvs.style.position = 'absolute'
+  // 注意：画布比容器大时 margin:auto 会被当成 0（CSS 的过约束规则），
+  // 那样画布会左对齐、画面看着像整体右移，所以用负边距显式居中
+  cvs.style.left = '50%'
+  cvs.style.top = '50%'
+  cvs.style.margin = '0'
+  cvs.style.marginLeft = -Math.round(w / 2) + 'px'
+  cvs.style.marginTop = -Math.round(h / 2) + 'px'
+  cvs.style.width = w + 'px'
+  cvs.style.height = h + 'px'
   updateGuide()
+}
+
+/**
+ * 当前可视区对应画布位图上的哪一块（位图像素）。
+ * 录制要按同一块裁切，才能和画面上看到的一致。
+ */
+function viewRect() {
+  const wrap = wrapRef.value
+  const cvs = liveCanvas()
+  if (!wrap || !cvs) return null
+  const cssW = cvs.clientWidth
+  const cssH = cvs.clientHeight
+  if (!cssW || !cssH) return null
+  const scaleX = cvs.width / cssW
+  const scaleY = cvs.height / cssH
+  const left = (cssW - wrap.clientWidth) / 2 - dx.value
+  const top = (cssH - wrap.clientHeight) / 2 - dy.value
+  return {
+    sx: left * scaleX,
+    sy: top * scaleY,
+    sw: wrap.clientWidth * scaleX,
+    sh: wrap.clientHeight * scaleY,
+  }
 }
 
 function updateGuide() {
@@ -102,6 +144,7 @@ function updateGuide() {
 }
 
 watch(() => props.recordMode, updateGuide)
+watch(() => props.scale, syncCanvasSize)
 
 function onMouseMove(e) {
   if (!props.mouseTrackEnabled) return
@@ -140,7 +183,7 @@ function resetOffset() {
 }
 
 // 复位按钮挪到了下方控制栏，这里把方法暴露出去给它调用
-defineExpose({ resetOffset })
+defineExpose({ resetOffset, viewRect })
 
 onMounted(() => {
   syncCanvasSize()
@@ -161,7 +204,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .canvas-wrap { flex:1; position:relative; background-color:#00b140; overflow:hidden; }
-.canvas-wrap canvas { display:block; width:100%; height:100%; transition: none; }
+.canvas-wrap canvas { display:block; position:absolute; transition: none; }
 .canvas-loading { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,.75); z-index:10; }
 .canvas-guide {
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);

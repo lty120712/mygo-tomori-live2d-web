@@ -12,6 +12,7 @@
         :mouseTrackEnabled="mouseTrackEnabled"
         :recordMode="recordMode"
         :background="background"
+        :scale="scalePercent"
         @mouse-move="onCanvasMouse"
       />
       <div class="canvas-sep"></div>
@@ -27,6 +28,8 @@
         :motionRemain="motionRemain"
         :motionPlaying="motionPlaying"
         v-model:recordMode="recordMode"
+        v-model:scale="scalePercent"
+        :getViewRect="getViewRect"
         @set-param="onSetParam"
         @reset-group="resetGroup"
         @reset-all="resetAllParams"
@@ -53,7 +56,7 @@
 </template>
 
 <script setup>
-import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { useModel } from './composables/useModel.js'
 import { useKeyframeAnimation } from './composables/useKeyframeAnimation.js'
 import { useBackground } from './composables/useBackground.js'
@@ -68,6 +71,7 @@ const {
   paramValues, mouseTrackEnabled, motionPlaying, motionProgress, motionLabel, motionRemain, motionDurations, toastMsg,
   loadModel, playMotion, setExpression, resetPose, setParam, resetGroup, resetAllParams, setAllParams, applyKfParams,
   applyMouseTrack, getSavedState, destroy,
+  modelScale, setModelScale,
 } = useModel()
 
 const kf = useKeyframeAnimation()
@@ -75,6 +79,12 @@ const kf = useKeyframeAnimation()
 const KF_STORAGE_KEY = 'tomori-kf-state'
 
 const canvasRef = ref(null)
+
+// 人物缩放：useModel 里是只读的，这里包一层可写计算属性给控件用
+const scalePercent = computed({
+  get: () => modelScale.value,
+  set: v => setModelScale(v),
+})
 
 // 导出比例：canvas = 跟随画布，portrait = 竖屏 9:16
 const recordMode = ref('canvas')
@@ -124,6 +134,11 @@ function onCanvasMouse(x, y, cvs) {
 // 画面被拖动过之后，用下方控制栏的「复位视图」把模型移回中央
 function onResetView() {
   canvasRef.value?.resetOffset()
+}
+
+// 录制按可视区裁切，保证画面放大或拖动后，录出来的构图和看到的一致
+function getViewRect() {
+  return canvasRef.value?.viewRect() ?? null
 }
 
 onMounted(() => {
