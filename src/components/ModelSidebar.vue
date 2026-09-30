@@ -28,7 +28,14 @@ defineEmits(['select'])
 const categories = computed(() => {
   const map = {}
   for (const m of props.models) {
-    if (!map[m.category]) map[m.category] = { key: m.category, label: m.category === 'tomori' ? 'Tomori' : 'Anon', items: [] }
+    if (!map[m.category]) {
+      // 分类名直接用目录名，新增角色目录时不用改代码
+      map[m.category] = {
+        key: m.category,
+        label: m.category.charAt(0).toUpperCase() + m.category.slice(1),
+        items: [],
+      }
+    }
     map[m.category].items.push(m)
   }
   return Object.values(map)

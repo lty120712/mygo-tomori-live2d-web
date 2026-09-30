@@ -87,7 +87,7 @@ const PALETTE = {
 }
 
 function prefixOf(s) {
-  for (const [prefix, _] of Object.entries(PALETTE)) {
+  for (const prefix of Object.keys(PALETTE)) {
     if (s.startsWith(prefix)) return prefix
   }
   return ''

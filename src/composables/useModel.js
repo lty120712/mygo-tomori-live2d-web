@@ -1,51 +1,12 @@
 import { ref, reactive, readonly, watch } from 'vue'
+import { init as createL2D } from 'l2d'
 import { PARAM_GROUPS, initParamValues } from '../params.js'
+import modelManifest from 'virtual:model-manifest'
 
-const L2D = window.L2D
 const STORAGE_KEY = 'tomori-viewer-state'
 
-if (!L2D) {
-  console.error('Live2D SDK not loaded')
-}
-
-const MODEL_LIST = [
-  { category: 'tomori', name: '2024_furisode' },
-  { category: 'tomori', name: 'birthday_2024_ssr' },
-  { category: 'tomori', name: 'casual-2023' },
-  { category: 'tomori', name: 'collabo_a_ur' },
-  { category: 'tomori', name: 'collabo_d_3_ur' },
-  { category: 'tomori', name: 'dream_festival_3_ur' },
-  { category: 'tomori', name: 'live_default' },
-  { category: 'tomori', name: 'live_event_235_ur' },
-  { category: 'tomori', name: 'live_event_240_ssr' },
-  { category: 'tomori', name: 'live_event_250_ur' },
-  { category: 'tomori', name: 'live_event_286_ur' },
-  { category: 'tomori', name: 'live_event_289_ur' },
-  { category: 'tomori', name: 'live_event_297_ur' },
-  { category: 'tomori', name: 'live_event_307_ssr' },
-  { category: 'tomori', name: 'live_sr_01' },
-  { category: 'tomori', name: 'school_summer-2023' },
-  { category: 'tomori', name: 'school_winter-2023' },
-  { category: 'anon', name: 'birthday_2024_ssr' },
-  { category: 'anon', name: 'casual-2023' },
-  { category: 'anon', name: 'collabo_a_ur' },
-  { category: 'anon', name: 'dream_festival_3_ur' },
-  { category: 'anon', name: 'live_default' },
-  { category: 'anon', name: 'live_event_235_ur' },
-  { category: 'anon', name: 'live_event_240_sr' },
-  { category: 'anon', name: 'live_event_250_r' },
-  { category: 'anon', name: 'live_event_253_ur' },
-  { category: 'anon', name: 'live_event_277_sr' },
-  { category: 'anon', name: 'live_event_286_sr' },
-  { category: 'anon', name: 'live_event_297_sr' },
-  { category: 'anon', name: 'live_event_307_ur' },
-  { category: 'anon', name: 'live_event_313_ur' },
-  { category: 'anon', name: 'live_sr_01' },
-  { category: 'anon', name: 'school_summer-2023' },
-  { category: 'anon', name: 'school_winter-2023' },
-]
-
-const models = MODEL_LIST
+const models = modelManifest
+const modelEntryMap = new Map(models.map(m => [m.category + '/' + m.name, m.entry]))
 const currentModel = ref('')
 const currentCategory = ref('')
 const loading = ref(false)
@@ -76,51 +37,29 @@ function showToast(msg) {
 
 let l2d = null
 let loadRequestId = 0
+let loadChain = Promise.resolve()
+let resizeObserver = null
 
 function setStatus(msg) { statusText.value = msg }
 
-async function loadModel(m, restore) {
-  let name, category
-  if (typeof m === 'string') {
-    const parts = m.split('/')
-    if (parts.length === 2) {
-      category = parts[0]
-      name = parts[1]
-    } else {
-      category = 'tomori'
-      name = m
-    }
-  } else {
-    name = m?.name
-    category = m?.category || 'tomori'
+// 容器尺寸变化时让 Live2D 重新计算后备缓冲，否则画面会停留在旧的像素尺寸上。
+function watchCanvasResize(cvs) {
+  if (resizeObserver || typeof ResizeObserver === 'undefined') return
+  const target = cvs.parentElement || cvs
+  resizeObserver = new ResizeObserver(() => {
+    if (l2d) l2d.resize()
+  })
+  resizeObserver.observe(target)
+}
+
+function ensureInstance(cvs) {
+  if (l2d) return l2d
+  const instance = createL2D(cvs)
+  if (!instance) {
+    setStatus('Live2D 初始化失败：目标不是 canvas 元素')
+    return null
   }
-  if (!name) return
-
-  if (!L2D) {
-    setStatus('Live2D SDK 未加载')
-    loading.value = false
-    return
-  }
-
-  const requestId = ++loadRequestId
-  
-  loading.value = true
-  statusText.value = '加载中...'
-  currentModel.value = ''
-  currentCategory.value = ''
-  currentMotion.value = ''
-  currentExpression.value = ''
-  motionGroups.value = []
-  expressionIds.value = []
-
-  if (l2d) { l2d.destroy(); l2d = null }
-
-  await new Promise(resolve => setTimeout(resolve, 50))
-
-  const cvs = document.getElementById('live2d-canvas')
-  if (!cvs) { loading.value = false; return }
-  const instance = L2D.init(cvs)
-  l2d = instance
+  watchCanvasResize(cvs)
   instance.on('motionstart', (_group, _index, duration) => {
     motionPlaying.value = true
     motionProgress.value = 0
@@ -145,9 +84,51 @@ async function loadModel(m, restore) {
     motionLabel.value = ''
     clearInterval(progressTimer)
   })
+  l2d = instance
+  return instance
+}
+
+async function loadModel(m, restore) {
+  let name, category
+  if (typeof m === 'string') {
+    const parts = m.split('/')
+    if (parts.length === 2) {
+      category = parts[0]
+      name = parts[1]
+    } else {
+      category = 'tomori'
+      name = m
+    }
+  } else {
+    name = m?.name
+    category = m?.category || 'tomori'
+  }
+  if (!name) return
+
+  const entry = (m && typeof m === 'object' && m.entry)
+    || modelEntryMap.get(category + '/' + name)
+    || 'model.json'
+
+  const requestId = ++loadRequestId
+  
+  loading.value = true
+  statusText.value = '加载中...'
+  currentModel.value = ''
+  currentCategory.value = ''
+  currentMotion.value = ''
+  currentExpression.value = ''
+  motionGroups.value = []
+  expressionIds.value = []
+
+  const cvs = document.getElementById('live2d-canvas')
+  if (!cvs) { loading.value = false; return }
+  const instance = ensureInstance(cvs)
+  if (!instance) { loading.value = false; return }
+  const modelUrl = '/models/' + category + '/' + name + '/'
+  const pending = loadChain.then(() => instance.load({ path: modelUrl + entry, scale: 1.0 }))
+  loadChain = pending.catch(() => {})
   try {
-    const modelUrl = '/models/' + category + '/' + name + '/'
-    await instance.load({ path: modelUrl + 'model.json', scale: 1.0 })
+    await pending
   } catch (err) {
     if (requestId !== loadRequestId) return
     console.error('Model load error:', err)
@@ -155,11 +136,8 @@ async function loadModel(m, restore) {
     loading.value = false
     return
   }
-  if (requestId !== loadRequestId) {
-    instance.destroy()
-    if (l2d === instance) l2d = null
-    return
-  }
+  if (requestId !== loadRequestId) return
+  l2d.resize()
   currentModel.value = category + '/' + name
   currentCategory.value = category
   statusText.value = '当前: ' + category + '/' + name
@@ -238,8 +216,9 @@ async function resetPose() {
     paramValues[key] = defaults[key]
   }
   const modelUrl = '/models/' + category + '/' + name + '/'
+  const entry = modelEntryMap.get(category + '/' + name) || 'model.json'
   try {
-    await l2d.load({ path: modelUrl + 'model.json', scale: 1.0 })
+    await l2d.load({ path: modelUrl + entry, scale: 1.0 })
   } catch (err) {
     console.error('Model reset error:', err)
     setStatus('复位失败: ' + currentModel.value)
@@ -316,17 +295,25 @@ function destroy() {
   loadRequestId++
   clearInterval(progressTimer)
   clearTimeout(toastTimer)
+  if (resizeObserver) {
+    resizeObserver.disconnect()
+    resizeObserver = null
+  }
   if (l2d) { l2d.destroy(); l2d = null }
 }
 
 function saveState() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({
-    model: currentModel.value,
-    motion: currentMotion.value,
-    expression: currentExpression.value,
-    params: { ...paramValues },
-    mouseTrack: mouseTrackEnabled.value,
-  }))
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      model: currentModel.value,
+      motion: currentMotion.value,
+      expression: currentExpression.value,
+      params: { ...paramValues },
+      mouseTrack: mouseTrackEnabled.value,
+    }))
+  } catch {
+    // Storage can be unavailable or full; keep the viewer responsive.
+  }
 }
 
 function getSavedState() {

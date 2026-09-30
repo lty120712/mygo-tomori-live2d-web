@@ -1,5 +1,125 @@
-# Vue 3 + Vite
+# Tomori Live2D Viewer
 
-This template should help get you started developing with Vue 3 in Vite. The template uses Vue 3 `<script setup>` SFCs, check out the [script setup docs](https://v3.vuejs.org/api/sfc-script-setup.html#sfc-script-setup) to learn more.
+一个跑在浏览器里的 Live2D 模型查看器兼动画编辑器，主要用来摆弄《BanG Dream! It's MyGO!!!!!》的高松灯和千早爱音模型：切模型、点动作表情、拖参数滑条、在时间轴上打关键帧、挂事件、配一段音乐，最后录成视频导出来。
 
-Learn more about IDE Support for Vue in the [Vue Docs Scaling up Guide](https://vuejs.org/guide/scaling-up/tooling.html#ide-support).
+纯前端项目，不需要后端。Live2D 运行时来自 npm 上的 `l2d` 包，已经随项目一起打包，断网也能正常跑。
+
+## 快速开始
+
+```bash
+npm install
+npm run dev        # 打开 http://127.0.0.1:5173
+```
+
+Windows 上也可以直接双击 `start.bat`，它会启动服务并自动打开浏览器。
+
+其他命令：
+
+```bash
+npm run build      # 产出 dist/
+npm run preview    # 本地预览构建结果
+```
+
+## 能做什么
+
+**模型浏览**：左侧列表按角色分组，点击即切换。模型是构建时扫描目录自动生成的，往 `public/models` 里放新模型不需要改代码。
+
+**参数控制**：底部按组切换，覆盖嘴部、眼睛、眉毛、表情、身体、头发、裙摆七组共 40 个参数，滑条和数字输入框联动。每个参数右边有个 ◆，点击就在当前帧打一个关键帧，再点一次取消。
+
+**动作与表情**：右侧面板列出模型自带的所有动作组和表情，带颜色分类和使用时长提示。
+
+**时间轴**：可设时长和 FPS，用帧或秒定位，支持上一帧/下一帧/上一关键帧/下一关键帧。关键帧之间自动插值，每个关键帧可以循环切换线性、缓入、缓出、缓入缓出四种缓动，时间轴上用不同形状区分。
+
+**事件轨**：点击事件条选一帧，就能挂一个"到这一帧播放某动作"或"切换到某表情"的事件。动作事件会检查时间区间是否重叠，表情事件不允许同帧重复。
+
+**音频与录制**：可以加载一段本地音频，时间轴时长会跟着音频走，播放时音画同步。录制会把画面渲染成视频文件下载，背景图、模型、音频一起合成。
+
+**工程导入导出**：时间轴上的关键帧和事件可以导出成 JSON，换台电脑或者发给别人再导入回来。
+
+**自动保存**：当前模型、动作、表情、参数、关键帧、事件都会存进浏览器本地，刷新页面自动恢复。
+
+## 快捷键
+
+| 按键 | 作用 |
+| --- | --- |
+| 空格 | 播放 / 暂停 |
+| ← / → | 后退一帧 / 前进一帧（播放中不生效） |
+
+在输入框里按这些键不会触发上面行为。
+
+## 目录结构
+
+| 路径 | 作用 |
+| --- | --- |
+| `index.html` | 页面入口 |
+| `vite.config.js` | Vite 配置，内含扫描模型目录的 `model-manifest` 插件 |
+| `src/main.js` | 挂载 Vue 应用和 Arco Design |
+| `src/App.vue` | 整体布局与各模块接线，负责关键帧状态的本地持久化 |
+| `src/params.js` | 参数分组定义（范围、步长、默认值），是参数清单的唯一来源 |
+| `src/composables/useModel.js` | Live2D 引擎封装：加载模型、动作、表情、参数下发、鼠标跟随、状态保存 |
+| `src/composables/useKeyframeAnimation.js` | 时间轴引擎：关键帧、缓动插值、事件、播放循环、序列化 |
+| `src/composables/useRecorder.js` | 录制导出：离屏画布合成、音频混流、MediaRecorder 编码 |
+| `src/components/ModelSidebar.vue` | 左侧模型列表 |
+| `src/components/ModelCanvas.vue` | 画布、拖拽平移、鼠标跟随、尺寸自适应 |
+| `src/components/RightPanel.vue` | 右侧动作与表情面板 |
+| `src/components/BottomBar.vue` | 底部播放控制、时间轴、事件轨、参数区、录制与导入导出 |
+| `public/models/` | 模型资源 |
+| `public/bg-character.png` | 画布与录制使用的背景图 |
+
+## 模型资源怎么放
+
+模型按 `public/models/<角色>/<模型名>/` 组织，例如 `public/models/tomori/live_default/`。构建和开发时插件会扫描这个目录，按下面的顺序寻找入口文件：
+
+1. `<模型名>.model.json`
+2. `model.json`
+3. `<模型名>.model3.json`
+4. 目录下任意 `.model3.json`
+
+找到入口后还会检查它引用的 `.moc3`（或 `model.json` 里的 `Moc` 字段）是否真实存在。资源缺失或不完整的模型会被跳过，并在构建输出里打印一行提示，避免出现在列表里点开却是空白。
+
+开发模式下新增或删除模型配置文件会触发页面自动刷新。
+
+## 参数清单
+
+参数定义在 `src/params.js`，界面和关键帧系统都从这里读取，改这一处即可。
+
+| 分组 | 参数 | 说明 | 范围 | 默认 |
+| --- | --- | --- | --- | --- |
+| 嘴部 | `PARAM_MOUTH_OPEN_Y` | 张嘴 | 0 ~ 1 | 0 |
+| 嘴部 | `PARAM_MOUTH_FORM_01` | 嘴型横拉 | 0 ~ 1 | 0 |
+| 嘴部 | `PARAM_MOUTH_FORM_Y` | 嘴型纵变 | 0 ~ 1 | 0 |
+| 嘴部 | `PARAM_MOUTH_SCALE` | 嘴巴大小 | 0 ~ 1 | 1 |
+| 眼睛 | `PARAM_EYE_L_OPEN` / `PARAM_EYE_R_OPEN` | 左右眼开闭 | 0 ~ 2 | 1 |
+| 眼睛 | `PARAM_EYE_L_SMILE` / `PARAM_EYE_R_SMILE` | 左右笑眼 | 0 ~ 1 | 0 |
+| 眼睛 | `PARAM_EYE_BALL_X` / `PARAM_EYE_BALL_Y` | 眼球偏移 | -1 ~ 1 | 0 |
+| 眼睛 | `PARAM_EYE_FORM` | 眼型 | 0 ~ 1 | 0 |
+| 眼睛 | `PARAM_EYE_SCALE` | 眼睛大小 | 0 ~ 1 | 1 |
+| 眼睛 | `PARAM_EYE_HIGHLIGHT` | 高光 | 0 ~ 1 | 1 |
+| 眼睛 | `PARAM_EYELID_L` / `PARAM_EYELID_R` | 左右眼皮 | 0 ~ 1 | 0 |
+| 眉毛 | `PARAM_BROW_L_*` / `PARAM_BROW_R_*` | 眉位移、角度、形状 | -1 ~ 1 / 0 ~ 1 | 0 |
+| 表情 | `PARAM_CHEEK` / `PARAM_CHEEK2` | 脸颊 | 0 ~ 1 | 0 |
+| 表情 | `PARAM_TEAR` | 泪水 | 0 ~ 1 | 0 |
+| 表情 | `PARAM_BREATH` | 呼吸 | 0 ~ 1 | 0 |
+| 身体 | `PARAM_BODY_ANGLE_X` / `_Y` / `_Z` | 旋转、俯仰、倾斜 | -30 ~ 30 | 0 |
+| 身体 | `PARAM_UPPER_BODY` | 前倾 | -1 ~ 1 | 0 |
+| 头发 | `PARAM_HAIR_FRONT` / `_SIDE` / `_BACK` | 前发、侧发、后发 | -1 ~ 1 | 0 |
+| 头发 | `PARAM_FLUFFY` | 蓬松度 | 0 ~ 1 | 0 |
+| 裙摆 | `PARAM_CLOTHES_A` | 裙摆摆动 | -1 ~ 1 | 0 |
+
+手臂、手指等编号命名的复杂参数没有开放手控，用它们调姿势的收益很低。
+
+## 录制说明
+
+录制按钮旁边可以选择导出比例：
+
+- **跟随画布**（默认）：导出比例和当前画布完全一致，所见即所得，最长边不超过 1920。适合留档。
+- **竖屏 9:16**：固定输出 1080×1920，画面按中心裁切后填满。适合发竖屏短视频，代价是画布左右或上下会被裁掉一部分。
+
+两种模式都会把背景图和模型合成到一起，音频轨同步写进视频。编码优先 VP9，不支持时退回 VP8，输出为 `.webm`。
+
+## 已知限制
+
+- 录制输出是 WebM，Safari 对 MediaRecorder 的支持有限，录制按钮在检测不到能力时不会显示。
+- 导出的是工程数据（关键帧、事件、时长、FPS），不含音频文件本身，导入后需要重新选择音频。
+- 动作事件的时间区间依赖模型动作时长，没播放过的动作按 2 秒估算，第一次播放后才会用真实时长。
+- 布局按桌面横屏设计，窄屏下侧栏和底部参数区会拥挤，暂未针对移动端适配。

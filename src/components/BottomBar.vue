@@ -24,6 +24,17 @@
         :title="recorder.isRecording.value ? '停止录制' : '开始录制 (自动播放)'"
         @click="onRecordToggle"
       >{{ recorder.isRecording.value ? '⏹ 录制中' : '⏺ 录制' }}</a-button>
+      <a-select
+        v-if="recorder.canRecord.value"
+        v-model="recordMode"
+        size="mini"
+        style="width:106px"
+        :disabled="recorder.isRecording.value"
+        title="导出画面比例"
+      >
+        <a-option value="canvas">跟随画布</a-option>
+        <a-option value="portrait">竖屏 9:16</a-option>
+      </a-select>
       <a-divider direction="vertical" style="border-color:#0f3460;margin:0 6px" />
       <span class="bb-label">时长</span>
       <a-input-number
@@ -58,6 +69,9 @@
       <span v-if="audioName" class="bb-info" :title="audioName">{{ audioName }}</span>
       <span v-else class="bb-label">无音频</span>
       <a-divider direction="vertical" style="border-color:#0f3460;margin:0 6px" />
+      <input ref="projectInputRef" type="file" accept="application/json,.json" style="display:none" @change="onProjectSelected" />
+      <a-button size="mini" title="导出关键帧与事件为 JSON" @click="exportProject">导出工程</a-button>
+      <a-button size="mini" title="从 JSON 恢复关键帧与事件" @click="projectInputRef.click()">导入工程</a-button>
       <a-button size="mini" status="danger" @click="onClear">清除全部</a-button>
     </div>
 
@@ -167,6 +181,7 @@
         <a-button size="mini" @click="showEventPicker = false">取消</a-button>
       </div>
     </div>
+    <div v-if="hintMsg" class="bb-hint">{{ hintMsg }}</div>
 
     <div class="bb-params">
       <div class="bb-group-tabs">
@@ -231,6 +246,16 @@ import { PARAM_GROUPS, initParamValues } from '../params.js'
 import { useRecorder } from '../composables/useRecorder.js'
 
 const recorder = useRecorder()
+const recordMode = ref('canvas')
+const projectInputRef = ref(null)
+const hintMsg = ref('')
+let hintTimer = null
+
+function showHint(msg) {
+  hintMsg.value = msg
+  clearTimeout(hintTimer)
+  hintTimer = setTimeout(() => { hintMsg.value = '' }, 2000)
+}
 
 const props = defineProps({
   values: { type: Object, required: true },
@@ -412,7 +437,7 @@ function addMotionEvent(name) {
   const dur = props.motionDurations?.[name] || 2
   const ok = props.kf.addEvent('motion', name, pendingEventFrame.value, dur)
   if (!ok) {
-    alert('该时间段与已有动作事件重叠，无法添加')
+    showHint('该时间段与已有动作事件重叠，无法添加')
   }
   showEventPicker.value = false
   eventPickName.value = ''
@@ -420,13 +445,47 @@ function addMotionEvent(name) {
 
 function addExpressionEvent(name) {
   if (!name) return
-  props.kf.addEvent('expression', name, pendingEventFrame.value, 0)
+  if (!props.kf.addEvent('expression', name, pendingEventFrame.value, 0)) {
+    showHint('该帧已经有一个表情事件了')
+  }
   showEventPicker.value = false
   eventPickExpr.value = ''
 }
 
 function clearEvents() {
   props.kf.events.splice(0, props.kf.events.length)
+}
+
+function exportProject() {
+  const data = { version: 1, ...props.kf.toJSON() }
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'tomori-project-' + Date.now() + '.json'
+  a.click()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+  showHint('工程已导出')
+}
+
+function onProjectSelected(e) {
+  const file = e.target.files?.[0]
+  e.target.value = ''
+  if (!file) return
+  const reader = new FileReader()
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(String(reader.result))
+      if (!data || typeof data !== 'object') throw new Error('invalid project')
+      props.kf.fromJSON(data)
+      emit('apply-kf-values', props.kf.getAllValuesAtFrame(props.kf.currentFrame.value, baseValues))
+      showHint('已导入 ' + file.name)
+    } catch {
+      showHint('导入失败：不是有效的工程 JSON')
+    }
+  }
+  reader.onerror = () => showHint('读取文件失败')
+  reader.readAsText(file)
 }
 
 function onRecordToggle() {
@@ -437,20 +496,33 @@ function onRecordToggle() {
   }
   const cvs = document.getElementById('live2d-canvas')
   if (!cvs) return
-  recorder.start(cvs, audioEl)
+  if (!recorder.start(cvs, audioEl, recordMode.value)) {
+    showHint('录制启动失败，请检查浏览器权限')
+    return
+  }
   if (audioEl && audioEl.paused) audioEl.currentTime = props.kf.currentFrame.value / props.kf.fps.value
   if (!props.kf.isPlaying.value) onPlay()
 }
 
 function onKeydown(e) {
-  if (e.code === 'Space' && !['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) {
+  if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return
+  if (e.code === 'Space') {
     e.preventDefault()
     props.kf.isPlaying.value ? onPause() : onPlay()
+    return
+  }
+  if ((e.code === 'ArrowLeft' || e.code === 'ArrowRight') && !props.kf.isPlaying.value) {
+    e.preventDefault()
+    onSliderSeek(props.kf.currentFrame.value + (e.code === 'ArrowLeft' ? -1 : 1))
   }
 }
 
 onMounted(() => document.addEventListener('keydown', onKeydown))
-onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', onKeydown)
+  clearTimeout(hintTimer)
+  recorder.destroy()
+})
 
 function precision(step) {
   const s = String(step)
@@ -572,6 +644,12 @@ function precision(step) {
 }
 .bb-ev-pick-label { color: #e94560; font-size: 12px; display: block; margin-bottom: 4px; }
 .bb-ev-pick-row { display: flex; align-items: center; gap: 8px; }
+
+.bb-hint {
+  padding: 5px 24px 5px 58px; flex-shrink: 0; font-size: 12px;
+  color: #f5a623; background: rgba(245,166,35,0.08);
+  border-bottom: 1px solid #0f3460;
+}
 /* slightly larger hit area for tooltip */
 .bb-kf-track :deep(.arco-tooltip-content) {
   background: #1a1a3e; border: 1px solid #0f3460; color: #eee;

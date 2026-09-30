@@ -69,7 +69,11 @@ const kf = useKeyframeAnimation()
 const KF_STORAGE_KEY = 'tomori-kf-state'
 
 function saveKfState() {
-  localStorage.setItem(KF_STORAGE_KEY, JSON.stringify(kf.toJSON()))
+  try {
+    localStorage.setItem(KF_STORAGE_KEY, JSON.stringify(kf.toJSON()))
+  } catch {
+    // Storage can be unavailable or full; keep editing usable.
+  }
 }
 
 let saveKfTimer = null
@@ -106,7 +110,7 @@ function onCanvasMouse(x, y, cvs) {
 onMounted(() => {
   loadKfState()
   const saved = getSavedState()
-  let defaultModel = models[8]
+  let defaultModel = models.find(m => m.category === 'tomori' && m.name === 'live_default') || models[0]
   if (saved?.model) {
     const parts = saved.model.split('/')
     if (parts.length === 2) {

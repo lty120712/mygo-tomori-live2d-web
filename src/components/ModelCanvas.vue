@@ -41,20 +41,31 @@ let dragStartX = 0
 let dragStartY = 0
 let baseDx = 0
 let baseDy = 0
+let resizeObserver = null
 
-function resizeCanvas() {
+// Live2D 加载模型时会用新节点替换掉 canvas，组件里的 ref 会指向已被移除的旧节点，
+// 所以每次都要从容器里重新取当前真正在页面上的那个 canvas。
+function liveCanvas() {
   const wrap = wrapRef.value
-  const cvs = canvasRef.value
-  if (!wrap || !cvs) return
-  cvs.width = wrap.clientWidth
-  cvs.height = wrap.clientHeight
+  if (!wrap) return canvasRef.value
+  return wrap.querySelector('canvas') || canvasRef.value
+}
+
+function syncCanvasSize() {
+  const cvs = liveCanvas()
+  if (!cvs) return
+  // SDK 会把第一次加载模型时的像素尺寸写进内联样式并固定下来，
+  // 这里覆盖成百分比，保证窗口或面板尺寸变化后画布仍然铺满容器。
+  cvs.style.width = '100%'
+  cvs.style.height = '100%'
 }
 
 function onMouseMove(e) {
   if (!props.mouseTrackEnabled) return
-  const cvs = canvasRef.value
+  const cvs = liveCanvas()
   if (!cvs) return
   const rect = cvs.getBoundingClientRect()
+  if (!rect.width || !rect.height) return
   emit('mouse-move', e.clientX - rect.left, e.clientY - rect.top, cvs)
 }
 
@@ -86,11 +97,19 @@ function resetOffset() {
 }
 
 onMounted(() => {
-  resizeCanvas()
-  window.addEventListener('resize', resizeCanvas)
+  syncCanvasSize()
+  window.addEventListener('resize', syncCanvasSize)
+  if (typeof ResizeObserver !== 'undefined' && wrapRef.value) {
+    resizeObserver = new ResizeObserver(syncCanvasSize)
+    resizeObserver.observe(wrapRef.value)
+  }
 })
 onBeforeUnmount(() => {
-  window.removeEventListener('resize', resizeCanvas)
+  window.removeEventListener('resize', syncCanvasSize)
+  if (resizeObserver) {
+    resizeObserver.disconnect()
+    resizeObserver = null
+  }
 })
 </script>
 

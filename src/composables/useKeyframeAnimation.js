@@ -39,15 +39,19 @@ export function useKeyframeAnimation() {
   }
 
   function setKeyframe(paramKey, frame, value) {
-    const f = Math.round(frame)
+    const numericFrame = Number(frame)
+    const numericValue = Number(value)
+    if (!paramKey || !Number.isFinite(numericFrame) || !Number.isFinite(numericValue)) return false
+    const f = Math.max(0, Math.min(totalFrames.value, Math.round(numericFrame)))
     const kfs = ensureParam(paramKey)
     const idx = kfs.findIndex(k => k.frame === f)
     if (idx >= 0) {
-      kfs[idx].value = value
+      kfs[idx].value = numericValue
     } else {
-      kfs.push({ frame: f, value, easing: 'linear' })
+      kfs.push({ frame: f, value: numericValue, easing: 'linear' })
     }
     kfs.sort((a, b) => a.frame - b.frame)
+    return true
   }
 
   function removeKeyframe(paramKey, frame) {
@@ -91,21 +95,28 @@ export function useKeyframeAnimation() {
   const events = reactive([])
 
   function canAddMotionEvent(frame, durationSec) {
-    if (totalFrames.value === 0) return false
-    const start = Math.round(frame)
-    const end = start + durationSec * fps.value
+    const start = Number(frame)
+    const duration = Number(durationSec)
+    if (totalFrames.value === 0 || !Number.isFinite(start) || !Number.isFinite(duration) || duration <= 0) return false
+    const clampedStart = Math.max(0, Math.min(totalFrames.value, Math.round(start)))
+    const end = clampedStart + duration * fps.value
     for (const e of events) {
       if (e.type !== 'motion') continue
       const eEnd = e.frame + (e.duration || 0) * fps.value
-      if (start < eEnd && end > e.frame) return false
+      if (clampedStart < eEnd && end > e.frame) return false
     }
     return true
   }
 
   function addEvent(type, name, frame, durationSec) {
-    const f = Math.round(frame)
-    if (type === 'motion' && !canAddMotionEvent(f, durationSec)) return false
-    events.push({ type, name, frame: f, duration: durationSec || 0 })
+    if (!['motion', 'expression'].includes(type) || typeof name !== 'string' || !name) return false
+    const numericFrame = Number(frame)
+    if (!Number.isFinite(numericFrame)) return false
+    const f = Math.max(0, Math.min(totalFrames.value, Math.round(numericFrame)))
+    const duration = Math.max(0, Number(durationSec) || 0)
+    if (type === 'motion' && !canAddMotionEvent(f, duration)) return false
+    if (type === 'expression' && events.some(e => e.type === 'expression' && e.frame === f)) return false
+    events.push({ type, name, frame: f, duration })
     events.sort((a, b) => a.frame - b.frame)
     return true
   }
