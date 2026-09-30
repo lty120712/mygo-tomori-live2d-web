@@ -10,6 +10,7 @@
         :statusText="statusText"
         :loading="loading"
         :mouseTrackEnabled="mouseTrackEnabled"
+        :recordMode="recordMode"
         @mouse-move="onCanvasMouse"
       />
       <div class="canvas-sep"></div>
@@ -24,6 +25,7 @@
         :motionLabel="motionLabel"
         :motionRemain="motionRemain"
         :motionPlaying="motionPlaying"
+        v-model:recordMode="recordMode"
         @set-param="onSetParam"
         @reset-group="resetGroup"
         @reset-all="resetAllParams"
@@ -49,7 +51,7 @@
 </template>
 
 <script setup>
-import { onMounted, onBeforeUnmount, watch } from 'vue'
+import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { useModel } from './composables/useModel.js'
 import { useKeyframeAnimation } from './composables/useKeyframeAnimation.js'
 import ModelSidebar from './components/ModelSidebar.vue'
@@ -68,6 +70,9 @@ const {
 const kf = useKeyframeAnimation()
 
 const KF_STORAGE_KEY = 'tomori-kf-state'
+
+// 导出比例：canvas = 跟随画布，portrait = 竖屏 9:16
+const recordMode = ref('canvas')
 
 function saveKfState() {
   try {

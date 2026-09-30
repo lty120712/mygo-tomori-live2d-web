@@ -26,11 +26,12 @@
       >{{ recorder.isRecording.value ? '⏹ 录制中' : '⏺ 录制' }}</a-button>
       <a-select
         v-if="recorder.canRecord.value"
-        v-model="recordMode"
+        :model-value="recordMode"
         size="mini"
         style="width:106px"
         :disabled="recorder.isRecording.value"
-        title="导出画面比例"
+        :title="'导出画面比例：' + (recordMode === 'portrait' ? '竖屏 9:16（画布上会显示取景框）' : '跟随画布')"
+        @change="v => $emit('update:recordMode', v)"
       >
         <a-option value="canvas">跟随画布</a-option>
         <a-option value="portrait">竖屏 9:16</a-option>
@@ -269,7 +270,6 @@ import { useRecorder } from '../composables/useRecorder.js'
 import { ESTIMATED_MOTION_SECONDS, formatSeconds } from '../motions.js'
 
 const recorder = useRecorder()
-const recordMode = ref('canvas')
 const projectInputRef = ref(null)
 const hintMsg = ref('')
 let hintTimer = null
@@ -291,9 +291,10 @@ const props = defineProps({
   motionLabel: { type: String, default: '' },
   motionRemain: { type: String, default: '' },
   motionPlaying: { type: Boolean, default: false },
+  recordMode: { type: String, default: 'canvas' },
 })
 
-const emit = defineEmits(['set-param', 'reset-group', 'reset-all', 'update:mouseTrackEnabled', 'apply-kf-values', 'trigger-motion', 'trigger-expression'])
+const emit = defineEmits(['set-param', 'reset-group', 'reset-all', 'update:mouseTrackEnabled', 'update:recordMode', 'apply-kf-values', 'trigger-motion', 'trigger-expression'])
 
 const groups = PARAM_GROUPS
 const baseValues = initParamValues()
@@ -724,7 +725,7 @@ function onRecordToggle() {
   }
   const cvs = document.getElementById('live2d-canvas')
   if (!cvs) return
-  if (!recorder.start(cvs, audioEl, recordMode.value)) {
+  if (!recorder.start(cvs, audioEl, props.recordMode)) {
     showHint('录制启动失败，请检查浏览器权限')
     return
   }

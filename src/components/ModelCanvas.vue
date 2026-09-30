@@ -14,6 +14,9 @@
       :style="{ transform: `translate(${dx}px, ${dy}px)` }"
     ></canvas>
     <div v-if="(dx !== 0 || dy !== 0) && !loading" class="canvas-reset" @click="resetOffset">↺ 复位</div>
+    <div v-if="guideStyle" class="canvas-guide" :style="guideStyle">
+      <span class="canvas-guide-label">录制区域 · 竖屏 9:16</span>
+    </div>
     <div class="canvas-info">{{ statusText }}</div>
     <div v-if="loading" class="canvas-loading">
       <a-spin :size="32" />
@@ -22,12 +25,13 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 
 const props = defineProps({
   statusText: { type: String, default: '' },
   loading: { type: Boolean, default: false },
   mouseTrackEnabled: { type: Boolean, default: true },
+  recordMode: { type: String, default: 'canvas' },
 })
 
 const emit = defineEmits(['mouse-move'])
@@ -42,6 +46,10 @@ let dragStartY = 0
 let baseDx = 0
 let baseDy = 0
 let resizeObserver = null
+
+// 竖屏导出按 9:16 居中裁切，这里把裁切范围画出来，
+// 否则切换比例后屏幕上毫无变化，根本看不出选了什么
+const guideStyle = ref(null)
 
 // Live2D 加载模型时会用新节点替换掉 canvas，组件里的 ref 会指向已被移除的旧节点，
 // 所以每次都要从容器里重新取当前真正在页面上的那个 canvas。
@@ -58,7 +66,29 @@ function syncCanvasSize() {
   // 这里覆盖成百分比，保证窗口或面板尺寸变化后画布仍然铺满容器。
   cvs.style.width = '100%'
   cvs.style.height = '100%'
+  updateGuide()
 }
+
+function updateGuide() {
+  const wrap = wrapRef.value
+  if (!wrap || props.recordMode !== 'portrait') {
+    guideStyle.value = null
+    return
+  }
+  const w = wrap.clientWidth
+  const h = wrap.clientHeight
+  if (!w || !h) {
+    guideStyle.value = null
+    return
+  }
+  const target = 9 / 16
+  const ratio = w / h
+  const width = ratio > target ? h * target : w
+  const height = ratio > target ? h : w / target
+  guideStyle.value = { width: Math.round(width) + 'px', height: Math.round(height) + 'px' }
+}
+
+watch(() => props.recordMode, updateGuide)
 
 function onMouseMove(e) {
   if (!props.mouseTrackEnabled) return
@@ -124,4 +154,14 @@ onBeforeUnmount(() => {
   border-radius: 6px; font-size: 12px; cursor: pointer; user-select: none;
 }
 .canvas-reset:hover { background: rgba(233,69,96,.2); }
+.canvas-guide {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  border: 1px dashed rgba(255,255,255,.75); pointer-events: none; z-index: 4;
+  box-shadow: 0 0 0 9999px rgba(0,0,0,.45);
+}
+.canvas-guide-label {
+  position: absolute; left: 0; top: -20px; font-size: 11px;
+  color: #fff; background: rgba(0,0,0,.6); padding: 2px 6px; border-radius: 4px;
+  white-space: nowrap;
+}
 </style>
