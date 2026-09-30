@@ -2,7 +2,7 @@
   <div class="right-panel">
     <div class="section">
       <h3 class="section-title">动作</h3>
-      <a-scrollbar class="section-scroll">
+      <div class="section-scroll">
         <div class="chip-grid">
           <a-tooltip
             v-for="g in motionGroups"
@@ -24,7 +24,7 @@
             </span>
           </a-tooltip>
         </div>
-      </a-scrollbar>
+      </div>
     </div>
 
     <a-button
@@ -35,7 +35,7 @@
 
     <div class="section">
       <h3 class="section-title">表情</h3>
-      <a-scrollbar class="section-scroll">
+      <div class="section-scroll">
         <div class="chip-grid">
           <span
             v-for="e in expressionIds"
@@ -49,7 +49,7 @@
             {{ e }}
           </span>
         </div>
-      </a-scrollbar>
+      </div>
     </div>
 
     <div v-if="toastMsg" class="toast">{{ toastMsg }}</div>
@@ -140,8 +140,14 @@ function onMotionClick(g) {
   padding-bottom: 6px; border-bottom: 1px solid #0f3460;
 }
 .section-scroll {
-  flex: 1; min-height: 0; overflow: auto;
+  flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
+  scrollbar-width: thin; scrollbar-color: #2a3f66 #101c33;
 }
+.section-scroll::-webkit-scrollbar { width: 8px; }
+.section-scroll::-webkit-scrollbar-track { background: #101c33; border-radius: 4px; }
+.section-scroll::-webkit-scrollbar-thumb { background: #2a3f66; border-radius: 4px; }
+.section-scroll::-webkit-scrollbar-thumb:hover { background: #3b5588; }
+.section-scroll::-webkit-scrollbar-corner { background: #101c33; }
 .chip-grid {
   display: flex; flex-wrap: wrap; gap: 4px; padding: 2px 0;
   align-content: flex-start;
