@@ -53,6 +53,81 @@ function watchCanvasResize(cvs) {
   resizeObserver.observe(target)
 }
 
+// Live2D SDK 自带一套鼠标跟随：它在 document 上监听 mousemove，让模型head跟着光标转，
+// 这一套不受应用自己的开关控制，所以关掉“鼠标跟随”时必须把它的监听摘掉。
+// SDK 没有对外暴露开关，只能按它的内部结构取监听函数；取不到就静默跳过，
+// 不影响应用自己那套跟随（那条路径本来就看 mouseTrackEnabled）。
+function sdkTrackingToggles() {
+  const state = l2d?._state
+  if (!state) return []
+  const toggles = []
+
+  // Cubism 2：state.l2d2Model 是渲染委托，把 mouseEvent 绑定成 _boundMouseEvent
+  const legacy = state.l2d2Model
+  if (legacy?._boundMouseEvent) {
+    const handler = legacy._boundMouseEvent
+    toggles.push({
+      on: () => {
+        document.addEventListener('mousemove', handler, false)
+        document.addEventListener('mouseout', handler, false)
+      },
+      off: () => {
+        document.removeEventListener('mousemove', handler, false)
+        document.removeEventListener('mouseout', handler, false)
+      },
+    })
+  }
+
+  // Cubism 6：state.l2d6Model 持有 mouseMoveEventListener / mouseEndedEventListener
+  const modern = state.l2d6Model
+  if (modern?.mouseMoveEventListener) {
+    const move = modern.mouseMoveEventListener
+    const end = modern.mouseEndedEventListener
+    toggles.push({
+      on: () => {
+        document.addEventListener('mousemove', move, { passive: true })
+        if (end) document.addEventListener('mouseout', end, { passive: true })
+      },
+      off: () => {
+        document.removeEventListener('mousemove', move)
+        if (end) document.removeEventListener('mouseout', end)
+      },
+    })
+  }
+
+  return toggles
+}
+
+function applySdkMouseTracking() {
+  if (!l2d) return
+  const toggles = sdkTrackingToggles()
+  if (toggles.length === 0) {
+    // SDK 内部结构调整时会走到这里，提示开关可能只关得掉应用自己的跟随
+    console.warn('[mouse-track] 没找到 Live2D 内置的鼠标跟随监听，开关可能不完整')
+    return
+  }
+  const enabled = mouseTrackEnabled.value
+
+  if (!enabled) {
+    // 关掉的时候顺手把视线收回正前方，否则模型会僵在最后一次跟随的角度上。
+    // 先发事件再摘监听，不然 SDK 收不到这个信号。
+    try {
+      document.dispatchEvent(new MouseEvent('mouseout'))
+      l2d.setParams({ PARAM_ANGLE_X: 0, PARAM_ANGLE_Y: 0 })
+    } catch {
+      // 个别环境构造事件或设置参数失败都无所谓，不能因此让开关失效
+    }
+  }
+
+  for (const toggle of toggles) {
+    try {
+      enabled ? toggle.on() : toggle.off()
+    } catch {
+      // 结构对不上就算了，不能因为跟随开关把界面搞挂
+    }
+  }
+}
+
 function ensureInstance(cvs) {
   if (l2d) return l2d
   const instance = createL2D(cvs)
@@ -149,6 +224,8 @@ async function loadModel(m, restore) {
   }
   if (requestId !== loadRequestId) return
   l2d.resize()
+  // 模型加载会重建 SDK 内部的渲染委托，跟随监听要按当前开关重新对齐
+  applySdkMouseTracking()
   currentModel.value = category + '/' + name
   currentCategory.value = category
   statusText.value = '当前: ' + category + '/' + name
@@ -238,6 +315,7 @@ async function resetPose() {
   }
   motionGroups.value = Object.keys(l2d.getMotions())
   expressionIds.value = l2d.getExpressions()
+  applySdkMouseTracking()
 }
 
 function resetGroup(groupKey) {
@@ -344,6 +422,8 @@ function debouncedSave() {
 watch([currentModel, currentMotion, currentExpression, mouseTrackEnabled, paramValues], () => {
   if (currentModel.value) debouncedSave()
 }, { deep: true })
+
+watch(mouseTrackEnabled, () => applySdkMouseTracking())
 
 export function useModel() {
   return {
