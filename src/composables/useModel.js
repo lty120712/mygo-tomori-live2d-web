@@ -43,6 +43,12 @@ let resizeObserver = null
 
 function setStatus(msg) { statusText.value = msg }
 
+// 画面上的状态文字已经移除，出错时改用浮层提示，避免失败后毫无反馈
+function setError(msg) {
+  statusText.value = msg
+  showToast(msg)
+}
+
 // 容器尺寸变化时让 Live2D 重新计算后备缓冲，否则画面会停留在旧的像素尺寸上。
 function watchCanvasResize(cvs) {
   if (resizeObserver || typeof ResizeObserver === 'undefined') return
@@ -132,7 +138,7 @@ function ensureInstance(cvs) {
   if (l2d) return l2d
   const instance = createL2D(cvs)
   if (!instance) {
-    setStatus('Live2D 初始化失败：目标不是 canvas 元素')
+    setError('Live2D 初始化失败：目标不是 canvas 元素')
     return null
   }
   watchCanvasResize(cvs)
@@ -218,7 +224,7 @@ async function loadModel(m, restore) {
   } catch (err) {
     if (requestId !== loadRequestId) return
     console.error('Model load error:', err)
-    setStatus('加载失败: ' + category + '/' + name)
+    setError('加载失败: ' + category + '/' + name)
     loading.value = false
     return
   }
@@ -310,7 +316,7 @@ async function resetPose() {
     await l2d.load({ path: modelUrl + entry, scale: 1.0 })
   } catch (err) {
     console.error('Model reset error:', err)
-    setStatus('复位失败: ' + currentModel.value)
+    setError('复位失败: ' + currentModel.value)
     return
   }
   motionGroups.value = Object.keys(l2d.getMotions())

@@ -13,11 +13,9 @@
       ref="canvasRef"
       :style="{ transform: `translate(${dx}px, ${dy}px)` }"
     ></canvas>
-    <div v-if="(dx !== 0 || dy !== 0) && !loading" class="canvas-reset" @click="resetOffset">↺ 复位</div>
     <div v-if="guideStyle" class="canvas-guide" :style="guideStyle">
       <span class="canvas-guide-label">录制区域 · 竖屏 9:16</span>
     </div>
-    <div class="canvas-info">{{ statusText }}</div>
     <div v-if="loading" class="canvas-loading">
       <a-spin :size="32" />
     </div>
@@ -29,7 +27,6 @@ import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { resolveBgColor } from '../background.js'
 
 const props = defineProps({
-  statusText: { type: String, default: '' },
   loading: { type: Boolean, default: false },
   mouseTrackEnabled: { type: Boolean, default: true },
   recordMode: { type: String, default: 'canvas' },
@@ -142,6 +139,9 @@ function resetOffset() {
   dy.value = 0
 }
 
+// 复位按钮挪到了下方控制栏，这里把方法暴露出去给它调用
+defineExpose({ resetOffset })
+
 onMounted(() => {
   syncCanvasSize()
   window.addEventListener('resize', syncCanvasSize)
@@ -162,14 +162,7 @@ onBeforeUnmount(() => {
 <style scoped>
 .canvas-wrap { flex:1; position:relative; background-color:#00b140; overflow:hidden; }
 .canvas-wrap canvas { display:block; width:100%; height:100%; transition: none; }
-.canvas-info { position:absolute; top:12px; left:12px; background:rgba(0,0,0,.65); padding:8px 14px; border-radius:8px; font-size:13px; pointer-events:none; z-index:5; color:#eee; }
 .canvas-loading { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,.75); z-index:10; }
-.canvas-reset {
-  position: absolute; bottom: 12px; right: 12px; z-index: 5;
-  background: rgba(0,0,0,.65); color: #e94560; padding: 6px 12px;
-  border-radius: 6px; font-size: 12px; cursor: pointer; user-select: none;
-}
-.canvas-reset:hover { background: rgba(233,69,96,.2); }
 .canvas-guide {
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
   border: 1px dashed rgba(255,255,255,.75); pointer-events: none; z-index: 4;

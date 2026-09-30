@@ -7,7 +7,7 @@
     />
     <div class="main-area">
       <ModelCanvas
-        :statusText="statusText"
+        ref="canvasRef"
         :loading="loading"
         :mouseTrackEnabled="mouseTrackEnabled"
         :recordMode="recordMode"
@@ -34,6 +34,7 @@
         @trigger-motion="playMotion"
         @trigger-expression="setExpression"
         @update:mouseTrackEnabled="v => mouseTrackEnabled = v"
+        @reset-view="onResetView"
       />
     </div>
     <RightPanel
@@ -62,7 +63,7 @@ import RightPanel from './components/RightPanel.vue'
 import BottomBar from './components/BottomBar.vue'
 
 const {
-  models, currentModel, loading, statusText,
+  models, currentModel, loading,
   motionGroups, currentMotion, expressionIds, currentExpression,
   paramValues, mouseTrackEnabled, motionPlaying, motionProgress, motionLabel, motionRemain, motionDurations, toastMsg,
   loadModel, playMotion, setExpression, resetPose, setParam, resetGroup, resetAllParams, setAllParams, applyKfParams,
@@ -72,6 +73,8 @@ const {
 const kf = useKeyframeAnimation()
 
 const KF_STORAGE_KEY = 'tomori-kf-state'
+
+const canvasRef = ref(null)
 
 // 导出比例：canvas = 跟随画布，portrait = 竖屏 9:16
 const recordMode = ref('canvas')
@@ -116,6 +119,11 @@ function onSetParam(key, value) {
 
 function onCanvasMouse(x, y, cvs) {
   applyMouseTrack(x, y, cvs)
+}
+
+// 画面被拖动过之后，用下方控制栏的「复位视图」把模型移回中央
+function onResetView() {
+  canvasRef.value?.resetOffset()
 }
 
 onMounted(() => {

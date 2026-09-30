@@ -252,6 +252,7 @@
 
     <div class="bb-footer">
       <a-button size="small" type="outline" style="border-color:#e94560;color:#e94560" @click="$emit('reset-all')">全部复位</a-button>
+      <a-button size="small" type="outline" title="把画面移回中央" @click="$emit('reset-view')">复位视图</a-button>
       <span class="bb-label">鼠标跟随</span>
       <a-switch size="small" :model-value="mouseTrackEnabled" @change="$emit('update:mouseTrackEnabled', $event)" />
       <a-divider direction="vertical" style="border-color:#0f3460;margin:0 6px" />
@@ -317,7 +318,7 @@ const props = defineProps({
   recordMode: { type: String, default: 'canvas' },
 })
 
-const emit = defineEmits(['set-param', 'reset-group', 'reset-all', 'update:mouseTrackEnabled', 'update:recordMode', 'apply-kf-values', 'trigger-motion', 'trigger-expression'])
+const emit = defineEmits(['set-param', 'reset-group', 'reset-all', 'reset-view', 'update:mouseTrackEnabled', 'update:recordMode', 'apply-kf-values', 'trigger-motion', 'trigger-expression'])
 
 const groups = PARAM_GROUPS
 const baseValues = initParamValues()
