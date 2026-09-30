@@ -23,6 +23,7 @@
         :motionProgress="motionProgress"
         :motionLabel="motionLabel"
         :motionRemain="motionRemain"
+        :motionPlaying="motionPlaying"
         @set-param="onSetParam"
         @reset-group="resetGroup"
         @reset-all="resetAllParams"

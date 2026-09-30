@@ -1,6 +1,7 @@
 import { ref, reactive, readonly, watch } from 'vue'
 import { init as createL2D } from 'l2d'
 import { PARAM_GROUPS, initParamValues } from '../params.js'
+import { collectMotionDurations } from '../motions.js'
 import modelManifest from 'virtual:model-manifest'
 
 const STORAGE_KEY = 'tomori-viewer-state'
@@ -88,6 +89,15 @@ function ensureInstance(cvs) {
   return instance
 }
 
+// 动作时长直接从动作文件里读，不必等用户先把每个动作播一遍。
+// 播放时 SDK 通过 motionstart 给的真实值优先级更高，会覆盖这里的值。
+async function harvestMotionDurations(modelUrl, requestId) {
+  if (!l2d) return
+  const durations = await collectMotionDurations(modelUrl, l2d.getMotions())
+  if (requestId !== loadRequestId) return
+  motionDurations.value = { ...durations, ...motionDurations.value }
+}
+
 async function loadModel(m, restore) {
   let name, category
   if (typeof m === 'string') {
@@ -119,6 +129,7 @@ async function loadModel(m, restore) {
   currentExpression.value = ''
   motionGroups.value = []
   expressionIds.value = []
+  motionDurations.value = {}
 
   const cvs = document.getElementById('live2d-canvas')
   if (!cvs) { loading.value = false; return }
@@ -144,6 +155,7 @@ async function loadModel(m, restore) {
 
   motionGroups.value = Object.keys(l2d.getMotions())
   expressionIds.value = l2d.getExpressions()
+  harvestMotionDurations(modelUrl, requestId)
 
   if (restore) {
     if (restore.motion && motionGroups.value.includes(restore.motion)) {

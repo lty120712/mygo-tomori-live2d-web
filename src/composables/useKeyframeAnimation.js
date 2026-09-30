@@ -94,18 +94,51 @@ export function useKeyframeAnimation() {
 
   const events = reactive([])
 
+  // 动作事件会占用一段区间，区间内不能再放别的动作。
+  // 这些区间是判断能否放置、画多宽、下一个空位在哪里的公共依据。
+  function getMotionRanges(ignoreIndex = -1) {
+    const ranges = []
+    for (let i = 0; i < events.length; i++) {
+      if (i === ignoreIndex) continue
+      const e = events[i]
+      if (e.type !== 'motion') continue
+      const start = e.frame
+      const end = start + Math.max(0, e.duration || 0) * fps.value
+      ranges.push({ index: i, name: e.name, start, end })
+    }
+    return ranges.sort((a, b) => a.start - b.start)
+  }
+
+  function overlapsOtherMotion(start, end, ignoreIndex) {
+    for (const range of getMotionRanges(ignoreIndex)) {
+      if (start < range.end && end > range.start) return true
+    }
+    return false
+  }
+
+  /** 从 from 帧往后找第一个没有被动作事件占用的帧 */
+  function findFreeFrame(from) {
+    const numeric = Number(from)
+    let f = Math.max(0, Math.min(totalFrames.value, Number.isFinite(numeric) ? Math.round(numeric) : 0))
+    const ranges = getMotionRanges()
+    for (let guard = 0; guard < 500; guard++) {
+      const hit = ranges.find(r => f >= r.start && f < r.end)
+      if (!hit) return f
+      const next = Math.ceil(hit.end)
+      if (next <= f) return f
+      f = Math.min(totalFrames.value, next)
+      if (f >= totalFrames.value) return f
+    }
+    return f
+  }
+
   function canAddMotionEvent(frame, durationSec) {
     const start = Number(frame)
     const duration = Number(durationSec)
     if (totalFrames.value === 0 || !Number.isFinite(start) || !Number.isFinite(duration) || duration <= 0) return false
     const clampedStart = Math.max(0, Math.min(totalFrames.value, Math.round(start)))
     const end = clampedStart + duration * fps.value
-    for (const e of events) {
-      if (e.type !== 'motion') continue
-      const eEnd = e.frame + (e.duration || 0) * fps.value
-      if (clampedStart < eEnd && end > e.frame) return false
-    }
-    return true
+    return !overlapsOtherMotion(clampedStart, end, -1)
   }
 
   function addEvent(type, name, frame, durationSec) {
@@ -123,6 +156,32 @@ export function useKeyframeAnimation() {
 
   function removeEvent(index) {
     events.splice(index, 1)
+  }
+
+  /** 把已有事件挪到新的起始帧；与其它动作重叠时拒绝并保持原位 */
+  function moveEvent(index, frame) {
+    const ev = events[index]
+    if (!ev) return false
+    const numeric = Number(frame)
+    if (!Number.isFinite(numeric)) return false
+    let target = Math.max(0, Math.min(totalFrames.value, Math.round(numeric)))
+    if (ev.type === 'motion') {
+      // 动作不能越过时间轴末尾，往前夹到刚好放得下
+      const length = Math.max(0, ev.duration || 0) * fps.value
+      target = Math.min(target, Math.max(0, Math.floor(totalFrames.value - length)))
+    }
+    if (target === ev.frame) return true
+
+    if (ev.type === 'motion') {
+      const end = target + Math.max(0, ev.duration || 0) * fps.value
+      if (overlapsOtherMotion(target, end, index)) return false
+    } else if (events.some((e, i) => i !== index && e.type === 'expression' && e.frame === target)) {
+      return false
+    }
+
+    ev.frame = target
+    events.sort((a, b) => a.frame - b.frame)
+    return true
   }
 
   function getActiveEventsAtFrame(frame) {
@@ -357,6 +416,7 @@ export function useKeyframeAnimation() {
     goToPrevKeyframe, goToNextKeyframe,
     play, pause, stop, setDuration, setFps,
     toJSON, fromJSON, clearAll,
-    events, canAddMotionEvent, addEvent, removeEvent, getActiveEventsAtFrame,
+    events, canAddMotionEvent, addEvent, removeEvent, moveEvent,
+    getMotionRanges, findFreeFrame, getActiveEventsAtFrame,
   }
 }

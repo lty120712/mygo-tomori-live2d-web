@@ -135,19 +135,27 @@
 
     <div class="bb-events">
       <span class="bb-row-label">事件</span>
-      <div class="bb-ev-track" @click="onEventTrackClick">
+      <div class="bb-ev-track" ref="evTrackRef" @click="onEventTrackClick">
         <a-tooltip
           v-for="(ev, i) in kf.events"
           :key="i"
-          :content="ev.name + (ev.type === 'motion' ? ' · ' + (props.motionDurations?.[ev.name] || ev.duration || 2).toFixed(1) + 's' : '') + ' (点击删除)'"
+          :content="eventTooltip(ev, i)"
           position="top"
           mini
         >
           <div
             class="bb-ev-bar"
-            :class="'ev-' + ev.type"
-            :style="eventBarStyle(ev)"
-            @click.stop="kf.removeEvent(i)"
+            :class="[
+              'ev-' + ev.type,
+              {
+                'is-dragging': dragIndex === i,
+                'is-invalid': dragIndex === i && !dragValid,
+                'is-conflict': conflictedIndexes.has(i) && dragIndex !== i,
+              },
+            ]"
+            :style="eventBarStyle(ev, i)"
+            @pointerdown="onBarPointerDown($event, i)"
+            @click.stop="onBarClick(i)"
           >{{ ev.name }}</div>
         </a-tooltip>
       </div>
@@ -156,17 +164,27 @@
       <a-button size="mini" status="danger" @click="clearEvents">清除全部事件</a-button>
     </div>
     <div v-if="showEventPicker" class="bb-ev-picker">
-      <span class="bb-ev-pick-label">在帧 {{ pendingEventFrame }} 添加：</span>
+      <div class="bb-ev-pick-head">
+        <span class="bb-ev-pick-label">在帧 {{ pendingEventFrame }}（{{ (pendingEventFrame / kf.fps.value).toFixed(2) }}s）添加</span>
+        <template v-if="pendingBlocked">
+          <span class="bb-ev-pick-warn">该帧在「{{ pendingBlocked.name }}」区间内（第 {{ pendingBlocked.start }}–{{ Math.ceil(pendingBlocked.end) }} 帧）</span>
+          <a-button size="mini" type="outline" @click="movePendingToFree">插入到第 {{ freeFrame }} 帧</a-button>
+        </template>
+        <span v-else class="bb-ev-pick-ok">位置空闲，从这里起可放 {{ (freeFrames / kf.fps.value).toFixed(1) }}s 以内的动作</span>
+      </div>
       <div class="bb-ev-pick-row">
         <a-select
           :model-value="eventPickName"
           size="mini"
-          style="width:150px"
+          style="width:220px"
           placeholder="-- 动作 --"
           allow-search
           @change="addMotionEvent"
         >
-          <a-option v-for="g in motionGroups" :key="g" :value="g">{{ g }}</a-option>
+          <a-option v-for="g in motionGroups" :key="g" :value="g">
+            <span style="float:left">{{ g }}</span>
+            <span :style="optionDurStyle(g)">{{ formatSeconds(motionSeconds(g)) }}</span>
+          </a-option>
         </a-select>
         <a-select
           :model-value="eventPickExpr"
@@ -179,6 +197,10 @@
           <a-option v-for="e in expressionIds" :key="e" :value="e">{{ e }}</a-option>
         </a-select>
         <a-button size="mini" @click="showEventPicker = false">取消</a-button>
+      </div>
+      <div v-if="pickError" class="bb-ev-pick-error">
+        {{ pickError }}
+        <a-button size="mini" @click="movePendingToFree">放到第 {{ freeFrame }} 帧</a-button>
       </div>
     </div>
     <div v-if="hintMsg" class="bb-hint">{{ hintMsg }}</div>
@@ -241,9 +263,10 @@
 </template>
 
 <script setup>
-import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
+import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { PARAM_GROUPS, initParamValues } from '../params.js'
 import { useRecorder } from '../composables/useRecorder.js'
+import { ESTIMATED_MOTION_SECONDS, formatSeconds } from '../motions.js'
 
 const recorder = useRecorder()
 const recordMode = ref('canvas')
@@ -267,6 +290,7 @@ const props = defineProps({
   motionProgress: { type: Number, default: 0 },
   motionLabel: { type: String, default: '' },
   motionRemain: { type: String, default: '' },
+  motionPlaying: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['set-param', 'reset-group', 'reset-all', 'update:mouseTrackEnabled', 'apply-kf-values', 'trigger-motion', 'trigger-expression'])
@@ -325,6 +349,8 @@ const showEventPicker = ref(false)
 const eventPickName = ref('')
 const eventPickExpr = ref('')
 const pendingEventFrame = ref(0)
+const pickError = ref('')
+const evTrackRef = ref(null)
 
 function getDisplayValue(paramKey) {
   return props.values[paramKey] ?? baseValues[paramKey] ?? 0
@@ -375,8 +401,18 @@ function onPlay() {
       if (ev.type === 'expression' && ev.frame === f) {
         triggeredByPlay.add(i)
         emit('trigger-expression', ev.name)
+        continue
       }
       if (ev.type === 'motion' && f >= ev.frame) {
+        const length = Math.max(1, eventSeconds(ev) * props.kf.fps.value)
+        if (f >= ev.frame + length) {
+          // 播放位置已经在动作区间之后，说明起播时已错过，直接作废
+          triggeredByPlay.add(i)
+          continue
+        }
+        // 上一个动作还没结束就先不触发，下一帧继续等。
+        // 否则事件会被标记成已触发，却因为动作冲突一次都没真正播出来
+        if (props.motionPlaying) continue
         triggeredByPlay.add(i)
         emit('trigger-motion', ev.name)
       }
@@ -416,30 +452,222 @@ function kfEasingLabel(frame) {
   return props.kf.getEasingLabel(kfDominantEasing(frame))
 }
 
-function eventBarStyle(ev) {
-  const left = (ev.frame / props.kf.totalFrames.value) * 100
-  if (ev.type === 'expression') {
-    return { left: left + '%' }
+/* ---------- 动作时长与占用区间 ---------- */
+
+/** 动作的真实时长（秒）。拿不到时用兜底值，只影响显示与占位估算 */
+function motionSeconds(name) {
+  const known = props.motionDurations?.[name]
+  return Number.isFinite(known) && known > 0 ? known : ESTIMATED_MOTION_SECONDS
+}
+
+function eventSeconds(ev) {
+  if (ev.type !== 'motion') return 0
+  const stored = Number(ev.duration)
+  return Number.isFinite(stored) && stored > 0 ? stored : motionSeconds(ev.name)
+}
+
+// 把事件里记的时长校正成动作文件里的真实时长，
+// 否则事件条宽度、重叠判断和各处提示会互相打架
+function syncEventDurations() {
+  for (const ev of props.kf.events) {
+    if (ev.type !== 'motion') continue
+    const real = props.motionDurations?.[ev.name]
+    if (Number.isFinite(real) && real > 0 && ev.duration !== real) ev.duration = real
   }
-  const dur = props.motionDurations?.[ev.name] || ev.duration || 2
-  const width = (dur * props.kf.fps.value / props.kf.totalFrames.value) * 100
+}
+
+watch(() => props.motionDurations, syncEventDurations, { deep: true, immediate: true })
+
+/** 互相重叠的动作事件下标（旧工程里用估算时长放下的会命中） */
+const conflictedIndexes = computed(() => {
+  const ranges = props.kf.getMotionRanges()
+  const bad = new Set()
+  for (let i = 0; i < ranges.length - 1; i++) {
+    if (ranges[i].end > ranges[i + 1].start + 1e-6) {
+      bad.add(ranges[i].index)
+      bad.add(ranges[i + 1].index)
+    }
+  }
+  return bad
+})
+
+/* ---------- 事件选择器 ---------- */
+
+const pendingBlocked = computed(() => {
+  const ranges = props.kf.getMotionRanges()
+  return ranges.find(r => pendingEventFrame.value >= r.start && pendingEventFrame.value < r.end) || null
+})
+
+const freeFrame = computed(() => props.kf.findFreeFrame(pendingEventFrame.value))
+
+/** 从最近的可插入位置起，到下一个动作区间之前还剩多少帧 */
+const freeFrames = computed(() => {
+  const start = freeFrame.value
+  const next = props.kf.getMotionRanges().find(r => r.start >= start)
+  const limit = next ? next.start : props.kf.totalFrames.value
+  return Math.max(0, limit - start)
+})
+
+function movePendingToFree() {
+  pendingEventFrame.value = freeFrame.value
+  pickError.value = ''
+}
+
+// 下拉面板是 teleport 到 body 的，scoped 样式够不着，这里直接用行内样式
+function optionDurStyle(name) {
+  const over = motionSeconds(name) * props.kf.fps.value > freeFrames.value
+  return {
+    float: 'right',
+    paddingLeft: '12px',
+    fontVariantNumeric: 'tabular-nums',
+    color: over ? '#f5a623' : '#94a3b8',
+  }
+}
+
+/* ---------- 事件条渲染 ---------- */
+
+function eventBarStyle(ev, index) {
+  const frame = dragIndex.value === index ? dragFrame.value : ev.frame
+  const left = (frame / props.kf.totalFrames.value) * 100
+  if (ev.type === 'expression') return { left: left + '%' }
+  const width = (eventSeconds(ev) * props.kf.fps.value / props.kf.totalFrames.value) * 100
   return { left: left + '%', width: Math.max(width, 2) + '%' }
 }
 
-function onEventTrackClick(e) {
+function eventTooltip(ev, index) {
+  if (ev.type === 'expression') {
+    return ev.name + ' · 表情 · 帧 ' + ev.frame + '（点击删除）'
+  }
+  const start = dragIndex.value === index ? dragFrame.value : ev.frame
+  const end = Math.round(start + eventSeconds(ev) * props.kf.fps.value)
+  const text = ev.name + ' · ' + formatSeconds(eventSeconds(ev)) + ' · 第 ' + start + '–' + end + ' 帧'
+  if (conflictedIndexes.value.has(index)) {
+    return text + ' · ⚠ 与相邻动作重叠，播放时会被跳过，拖动可调整'
+  }
+  return text + ' · 拖动挪位置，点击删除'
+}
+
+/* ---------- 拖动调整位置 ---------- */
+
+const dragIndex = ref(-1)
+const dragFrame = ref(0)
+const dragValid = ref(true)
+let dragMoved = false
+let suppressClick = false
+let dragGrabOffset = 0
+let dragLengthFrames = 0
+let dragRect = null
+let dragPxPerFrame = 1
+let dragStartX = 0
+
+/** 找不与其它动作重叠的落点：先试原地，不行就吸附到相邻区间的两端 */
+function resolveDropFrame(target, ignoreIndex, lengthFrames) {
+  const ranges = props.kf.getMotionRanges(ignoreIndex)
+  const fits = (start) => {
+    if (start < 0 || start + lengthFrames > props.kf.totalFrames.value + 1e-6) return false
+    return !ranges.some(r => start < r.end - 1e-6 && start + lengthFrames > r.start + 1e-6)
+  }
+  if (fits(target)) return { frame: target, ok: true }
+
+  const candidates = []
+  for (const r of ranges) {
+    candidates.push(Math.round(r.end), Math.round(r.start - lengthFrames))
+  }
+  const usable = candidates.filter(fits)
+  if (usable.length === 0) return { frame: target, ok: false }
+  usable.sort((a, b) => Math.abs(a - target) - Math.abs(b - target))
+  return { frame: usable[0], ok: true }
+}
+
+function onBarPointerDown(e, index) {
   if (props.kf.isPlaying.value) return
+  const ev = props.kf.events[index]
+  const track = evTrackRef.value
+  if (!ev || !track || !props.kf.totalFrames.value) return
+  const rect = track.getBoundingClientRect()
+  if (!rect.width) return
+
+  dragRect = rect
+  dragPxPerFrame = rect.width / props.kf.totalFrames.value
+  dragGrabOffset = (e.clientX - rect.left) / dragPxPerFrame - ev.frame
+  dragLengthFrames = ev.type === 'motion' ? eventSeconds(ev) * props.kf.fps.value : 0
+  dragIndex.value = index
+  dragFrame.value = ev.frame
+  dragValid.value = true
+  dragMoved = false
+  dragStartX = e.clientX
+
+  window.addEventListener('pointermove', onBarPointerMove)
+  window.addEventListener('pointerup', onBarPointerUp)
+  window.addEventListener('pointercancel', onBarPointerUp)
+}
+
+function onBarPointerMove(e) {
+  if (dragIndex.value < 0 || !dragRect) return
+  if (Math.abs(e.clientX - dragStartX) > 3) dragMoved = true
+
+  const raw = (e.clientX - dragRect.left) / dragPxPerFrame - dragGrabOffset
+  const limit = Math.max(0, props.kf.totalFrames.value - dragLengthFrames)
+  const target = Math.max(0, Math.min(limit, Math.round(raw)))
+  const drop = resolveDropFrame(target, dragIndex.value, dragLengthFrames)
+  dragFrame.value = drop.frame
+  dragValid.value = drop.ok
+}
+
+function onBarPointerUp() {
+  window.removeEventListener('pointermove', onBarPointerMove)
+  window.removeEventListener('pointerup', onBarPointerUp)
+  window.removeEventListener('pointercancel', onBarPointerUp)
+
+  const index = dragIndex.value
+  const frame = dragFrame.value
+  const moved = dragMoved
+  dragIndex.value = -1
+  dragRect = null
+  dragMoved = false
+
+  if (index < 0 || !moved) {
+    suppressClick = false
+    return
+  }
+  suppressClick = true
+  props.kf.moveEvent(index, frame)
+}
+
+function onBarClick(index) {
+  if (suppressClick) {
+    suppressClick = false
+    return
+  }
+  if (props.kf.isPlaying.value) return
+  props.kf.removeEvent(index)
+}
+
+/* ---------- 添加事件 ---------- */
+
+function onEventTrackClick() {
+  if (props.kf.isPlaying.value || dragIndex.value >= 0) return
   pendingEventFrame.value = Math.floor(props.kf.currentFrame.value)
+  pickError.value = ''
   showEventPicker.value = true
 }
 
 function addMotionEvent(name) {
   if (!name) return
-  const dur = props.motionDurations?.[name] || 2
-  const ok = props.kf.addEvent('motion', name, pendingEventFrame.value, dur)
-  if (!ok) {
-    showHint('该时间段与已有动作事件重叠，无法添加')
+  const dur = motionSeconds(name)
+  if (props.kf.addEvent('motion', name, pendingEventFrame.value, dur)) {
+    pickError.value = ''
+    showEventPicker.value = false
+    eventPickName.value = ''
+    return
   }
-  showEventPicker.value = false
+  // 放不下时保留选择器，把原因和出路一起给出来
+  const blocked = props.kf.getMotionRanges().find(
+    r => pendingEventFrame.value >= r.start && pendingEventFrame.value < r.end
+  )
+  pickError.value = blocked
+    ? `放不下：「${blocked.name}」占用了第 ${blocked.start}–${Math.ceil(blocked.end)} 帧，而 ${name} 需要 ${formatSeconds(dur)}。`
+    : `放不下：这段空间不足 ${formatSeconds(dur)}。`
   eventPickName.value = ''
 }
 
@@ -622,7 +850,7 @@ function precision(step) {
 .bb-ev-bar {
   position: absolute; top: 2px; height: 16px; border-radius: 3px;
   display: flex; align-items: center; padding: 0 6px; font-size: 10px;
-  overflow: hidden; white-space: nowrap; cursor: pointer;
+  overflow: hidden; white-space: nowrap; cursor: grab; touch-action: none;
   color: #fff; user-select: none; min-width: 6px; font-weight: 500;
 }
 .bb-ev-bar.ev-motion { background: linear-gradient(135deg, #e94560, #c0392b); }
@@ -631,6 +859,14 @@ function precision(step) {
   width: 8px !important; min-width: 8px !important;
   background: #f5a623; border: 2px solid #fff;
   border-radius: 50%; top: 5px; height: 8px; padding: 0; font-size: 0;
+}
+.bb-ev-bar.ev-motion.is-dragging {
+  cursor: grabbing; opacity: 0.9; z-index: 3;
+  box-shadow: inset 0 0 0 1px #fff;
+}
+.bb-ev-bar.ev-motion.is-invalid { background: #7f1d1d; }
+.bb-ev-bar.ev-motion.is-conflict {
+  background: repeating-linear-gradient(45deg, #b91c1c 0 4px, #7f1d1d 4px 8px);
 }
 .bb-ev-clear { flex-shrink: 0; font-size: 11px; }
 
@@ -642,7 +878,16 @@ function precision(step) {
   padding: 6px 24px 6px 58px; flex-shrink: 0;
   border-bottom: 1px solid #0f3460; background: rgba(0,0,0,0.15);
 }
-.bb-ev-pick-label { color: #e94560; font-size: 12px; display: block; margin-bottom: 4px; }
+.bb-ev-pick-head {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 5px;
+}
+.bb-ev-pick-label { color: #e94560; font-size: 12px; }
+.bb-ev-pick-ok { color: #2dd4bf; font-size: 12px; }
+.bb-ev-pick-warn { color: #f5a623; font-size: 12px; }
+.bb-ev-pick-error {
+  margin-top: 5px; font-size: 12px; color: #ff8a8a;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
 .bb-ev-pick-row { display: flex; align-items: center; gap: 8px; }
 
 .bb-hint {
