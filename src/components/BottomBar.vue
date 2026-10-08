@@ -2,12 +2,12 @@
   <div class="bottom-bar">
     <div class="bb-controls">
       <div class="bb-btns">
-        <a-button size="mini" title="跳到开头" @click="kf.goToStart()">|<</a-button>
-        <a-button size="mini" title="上一帧" @click="kf.goToFrame(kf.currentFrame.value - 1)">&#9664;</a-button>
+        <a-button size="mini" title="跳到开头" @click="onSliderSeek(0)">|<</a-button>
+        <a-button size="mini" title="上一帧" @click="onSliderSeek(kf.currentFrame.value - 1)">&#9664;</a-button>
         <a-button v-if="!kf.isPlaying.value" size="mini" type="primary" title="播放" @click="onPlay">&#9654;</a-button>
         <a-button v-else size="mini" status="warning" title="暂停" @click="onPause">&#9646;&#9646;</a-button>
-        <a-button size="mini" title="下一帧" @click="kf.goToFrame(kf.currentFrame.value + 1)">&#9654;</a-button>
-        <a-button size="mini" title="跳到末尾" @click="kf.goToEnd()">>|</a-button>
+        <a-button size="mini" title="下一帧" @click="onSliderSeek(kf.currentFrame.value + 1)">&#9654;</a-button>
+        <a-button size="mini" title="跳到末尾" @click="onSliderSeek(kf.totalFrames.value)">>|</a-button>
         <a-button size="mini" title="停止" @click="onStop">&#9632;</a-button>
       </div>
       <a-divider direction="vertical" style="border-color:#0f3460;margin:0 6px" />
@@ -56,14 +56,14 @@
       <span class="bb-info">帧 <b>{{ Math.floor(kf.currentFrame.value) }}</b> / {{ kf.totalFrames.value }}</span>
       <span class="bb-info">{{ kf.currentTime.value.toFixed(2) }}s</span>
       <a-divider direction="vertical" style="border-color:#0f3460;margin:0 6px" />
-      <a-button size="mini" @click="kf.goToPrevKeyframe()">上一关键帧</a-button>
+      <a-button size="mini" @click="onKeyframeSeek('prev')">上一关键帧</a-button>
       <a-input-number
         :model-value="Math.floor(kf.currentFrame.value)"
         :min="0" :max="kf.totalFrames.value"
         size="mini" style="width:68px"
-        @update:model-value="kf.goToFrame($event)"
+        @update:model-value="onSliderSeek($event)"
       />
-      <a-button size="mini" @click="kf.goToNextKeyframe()">下一关键帧</a-button>
+      <a-button size="mini" @click="onKeyframeSeek('next')">下一关键帧</a-button>
       <div class="bb-spacer"></div>
       <input ref="audioInputRef" type="file" accept="audio/*" style="display:none" @change="onAudioSelected" />
       <a-button size="mini" title="加载音频" @click="audioInputRef.click()">&#9835;</a-button>
@@ -435,12 +435,19 @@ function tooltipFormat(frame) {
 }
 
 function onSliderSeek(frame) {
+  if (!Number.isFinite(Number(frame))) return
   props.kf.goToFrame(frame)
   if (audioEl && !props.kf.isPlaying.value) {
-    audioEl.currentTime = frame / props.kf.fps.value
+    audioEl.currentTime = props.kf.currentFrame.value / props.kf.fps.value
   }
   const vals = props.kf.getAllValuesAtFrame(props.kf.currentFrame.value, baseValues)
   emit('apply-kf-values', vals)
+}
+
+function onKeyframeSeek(direction) {
+  if (direction === 'prev') props.kf.goToPrevKeyframe()
+  else props.kf.goToNextKeyframe()
+  onSliderSeek(props.kf.currentFrame.value)
 }
 
 let triggeredByPlay = new Set()

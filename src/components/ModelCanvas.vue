@@ -11,7 +11,6 @@
     <canvas
       id="live2d-canvas"
       ref="canvasRef"
-      :style="{ transform: `translate(${dx}px, ${dy}px)` }"
     ></canvas>
     <div v-if="guideStyle" class="canvas-guide" :style="guideStyle">
       <span class="canvas-guide-label">录制区域 · 竖屏 9:16</span>
@@ -60,6 +59,7 @@ let dragStartY = 0
 let baseDx = 0
 let baseDy = 0
 let resizeObserver = null
+let canvasObserver = null
 
 const scaleFactor = computed(() => {
   const k = Number(props.scale) / 100
@@ -76,6 +76,13 @@ function liveCanvas() {
   const wrap = wrapRef.value
   if (!wrap) return canvasRef.value
   return wrap.querySelector('canvas') || canvasRef.value
+}
+
+// SDK 切换渲染器时会替换 canvas，位移必须写到当前节点，
+// 不能依赖 Vue 对原始 canvas 节点的样式绑定。
+function syncCanvasOffset() {
+  const cvs = liveCanvas()
+  if (cvs) cvs.style.transform = `translate(${dx.value}px, ${dy.value}px)`
 }
 
 function syncCanvasSize() {
@@ -98,6 +105,7 @@ function syncCanvasSize() {
   cvs.style.marginTop = -Math.round(h / 2) + 'px'
   cvs.style.width = w + 'px'
   cvs.style.height = h + 'px'
+  syncCanvasOffset()
   updateGuide()
 }
 
@@ -145,6 +153,7 @@ function updateGuide() {
 
 watch(() => props.recordMode, updateGuide)
 watch(() => props.scale, syncCanvasSize)
+watch([dx, dy], syncCanvasOffset, { flush: 'sync' })
 
 function onMouseMove(e) {
   if (!props.mouseTrackEnabled) return
@@ -187,6 +196,8 @@ defineExpose({ resetOffset, viewRect })
 
 onMounted(() => {
   syncCanvasSize()
+  canvasObserver = new MutationObserver(syncCanvasSize)
+  canvasObserver.observe(wrapRef.value, { childList: true })
   window.addEventListener('resize', syncCanvasSize)
   if (typeof ResizeObserver !== 'undefined' && wrapRef.value) {
     resizeObserver = new ResizeObserver(syncCanvasSize)
@@ -194,6 +205,7 @@ onMounted(() => {
   }
 })
 onBeforeUnmount(() => {
+  canvasObserver?.disconnect()
   window.removeEventListener('resize', syncCanvasSize)
   if (resizeObserver) {
     resizeObserver.disconnect()
