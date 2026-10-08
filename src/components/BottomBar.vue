@@ -451,19 +451,30 @@ function onKeyframeSeek(direction) {
 }
 
 let triggeredByPlay = new Set()
+let lastEventFrame = -1
+
+function syncPlaybackAudio() {
+  if (!audioEl) return
+  audioEl.currentTime = props.kf.currentFrame.value / props.kf.fps.value
+  audioEl.play().catch(() => {})
+}
 
 function onPlay() {
+  if (props.kf.isPlaying.value) return
+  if (props.kf.currentFrame.value >= props.kf.totalFrames.value) props.kf.goToStart()
   triggeredByPlay = new Set()
-  if (audioEl) { audioEl.currentTime = props.kf.currentFrame.value / props.kf.fps.value; audioEl.play().catch(() => {}) }
+  lastEventFrame = Math.ceil(props.kf.currentFrame.value) - 1
+  syncPlaybackAudio()
   props.kf.play((frame) => {
     const vals = props.kf.getKeyframedValuesAtFrame(frame)
     if (Object.keys(vals).length > 0) emit('apply-kf-values', vals)
 
-    const f = Math.round(frame)
+    const f = Math.floor(frame)
     for (let i = 0; i < props.kf.events.length; i++) {
       const ev = props.kf.events[i]
       if (triggeredByPlay.has(i)) continue
-      if (ev.type === 'expression' && ev.frame === f) {
+      // 检查本次经过的区间，卡顿或高 FPS 时跳过某一帧也不能漏掉表情。
+      if (ev.type === 'expression' && ev.frame > lastEventFrame && ev.frame <= f) {
         triggeredByPlay.add(i)
         emit('trigger-expression', ev.name)
         continue
@@ -482,8 +493,11 @@ function onPlay() {
         emit('trigger-motion', ev.name)
       }
     }
-  }, () => {
-    if (recorder.isRecording.value) recorder.stop()
+    lastEventFrame = f
+  }, onStop, () => {
+    triggeredByPlay = new Set()
+    lastEventFrame = -1
+    syncPlaybackAudio()
   })
 }
 
@@ -500,7 +514,9 @@ function onStop() {
 }
 
 function onClear() {
+  onStop()
   props.kf.clearAll()
+  showEventPicker.value = false
   emit('apply-kf-values', baseValues)
 }
 

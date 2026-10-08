@@ -296,7 +296,7 @@ export function useKeyframeAnimation() {
     goToFrame(totalFrames.value)
   }
 
-  function play(onTick, onEnd) {
+  function play(onTick, onEnd, onLoop) {
     if (isPlaying.value) return
     if (currentFrame.value >= totalFrames.value) {
       currentFrame.value = 0
@@ -321,6 +321,8 @@ export function useKeyframeAnimation() {
         if (isLooping.value) {
           currentFrame.value = 0
           lastTimestamp = null
+          if (onLoop) onLoop()
+          if (tickCallback) tickCallback(0)
           animFrameId = requestAnimationFrame(tick)
         } else {
           stop()
@@ -400,6 +402,7 @@ export function useKeyframeAnimation() {
 
   function clearAll() {
     for (const key of Object.keys(keyframes)) delete keyframes[key]
+    events.splice(0, events.length)
     currentFrame.value = 0
     isPlaying.value = false
     pause()
