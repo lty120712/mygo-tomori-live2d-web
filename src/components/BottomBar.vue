@@ -207,6 +207,11 @@
     <div v-if="hintMsg" class="bb-hint">{{ hintMsg }}</div>
 
     <div class="bb-params">
+      <div class="bb-param-tools">
+        <a-input v-model="paramSearch" size="mini" placeholder="搜索参数名称或 ID" allow-clear style="width:210px" />
+        <a-checkbox v-model="showAllParams">全部参数</a-checkbox>
+        <span class="bb-label">{{ visibleParams.length }} / {{ paramCount }} 项</span>
+      </div>
       <div class="bb-group-tabs">
         <span
           v-for="group in groups"
@@ -216,9 +221,9 @@
           @click="activeGroup = group.key"
         >{{ group.header }}</span>
       </div>
-      <div class="bb-sliders" v-if="activeGroupObj">
-        <div v-for="p in activeGroupObj.params" :key="p.key" class="bb-param-row">
-          <span class="bb-param-label">{{ p.label }}</span>
+      <div class="bb-sliders">
+        <div v-for="p in visibleParams" :key="p.key" class="bb-param-row" :data-param-id="p.key">
+          <span class="bb-param-label" :title="p.label + ' · ' + p.key">{{ p.label }}</span>
           <a-slider
             :model-value="getDisplayValue(p.key)"
             :min="p.min"
@@ -246,7 +251,17 @@
             :title="kf.hasKeyframe(p.key, kf.currentFrame.value) ? '关键帧 · ' + kf.getEasingLabel(kf.getKfEasing(p.key, kf.currentFrame.value)) + ' (点击移除)' : '添加关键帧'"
             @click="toggleKeyframe(p.key)"
           >&#9670;</span>
+          <a-button
+            size="mini"
+            type="outline"
+            class="bb-param-reset"
+            :title="'恢复默认值：' + p.default + '，删除当前帧关键帧'"
+            :aria-label="'重置' + p.label"
+            :disabled="kf.isPlaying.value"
+            @click="emit('reset-param', p.key, p.default)"
+          >重置</a-button>
         </div>
+        <span v-if="!visibleParams.length" class="bb-label">{{ paramSearch ? '没有匹配的参数' : '请选择模型或展开全部参数' }}</span>
       </div>
     </div>
 
@@ -315,7 +330,6 @@
 
 <script setup>
 import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
-import { PARAM_GROUPS, initParamValues } from '../params.js'
 import { useRecorder } from '../composables/useRecorder.js'
 import { ESTIMATED_MOTION_SECONDS, formatSeconds } from '../motions.js'
 import { useBackground } from '../composables/useBackground.js'
@@ -337,6 +351,8 @@ function showHint(msg) {
 
 const props = defineProps({
   values: { type: Object, required: true },
+  paramGroups: { type: Array, default: () => [] },
+  modelKey: { type: String, default: '' },
   kf: { type: Object, required: true },
   motionGroups: { type: Array, default: () => [] },
   expressionIds: { type: Array, default: () => [] },
@@ -351,13 +367,29 @@ const props = defineProps({
   getViewRect: { type: Function, default: null },
 })
 
-const emit = defineEmits(['set-param', 'reset-group', 'reset-all', 'reset-view', 'update:mouseTrackEnabled', 'update:recordMode', 'update:scale', 'apply-kf-values', 'trigger-motion', 'trigger-expression'])
+const emit = defineEmits(['set-param', 'reset-param', 'reset-group', 'reset-all', 'reset-view', 'update:mouseTrackEnabled', 'update:recordMode', 'update:scale', 'apply-kf-values', 'trigger-motion', 'trigger-expression'])
 
-const groups = PARAM_GROUPS
-const baseValues = initParamValues()
-const activeGroup = ref(groups[0]?.key || 'mouth')
+const paramSearch = ref('')
+const showAllParams = ref(false)
+const activeGroup = ref('mouth')
+const groups = computed(() => props.paramGroups.map(g => ({
+  ...g, params: g.params.filter(p => showAllParams.value || p.common),
+})).filter(g => g.params.length))
+const paramCount = computed(() => props.paramGroups.reduce((n, g) => n + g.params.length, 0))
+const visibleParams = computed(() => {
+  const query = paramSearch.value.trim().toLowerCase()
+  if (query) return props.paramGroups.flatMap(g => g.params).filter(p =>
+    (p.label + ' ' + p.key).toLowerCase().includes(query))
+  return groups.value.find(g => g.key === activeGroup.value)?.params || []
+})
+watch(groups, list => {
+  if (!list.some(g => g.key === activeGroup.value)) activeGroup.value = list[0]?.key || ''
+}, { immediate: true })
+watch(() => props.modelKey, (model, previous) => {
+  if (previous && model !== previous) onStop()
+  paramSearch.value = ''
+})
 
-const activeGroupObj = computed(() => groups.find(g => g.key === activeGroup.value))
 const uniqueFrames = computed(() => props.kf.getUniqueFramePositions())
 const motionEventFrames = computed(() => props.kf.events.filter(e => e.type === 'motion').map(e => e.frame).filter((v, i, a) => a.indexOf(v) === i))
 const exprEventFrames = computed(() => props.kf.events.filter(e => e.type === 'expression').map(e => e.frame).filter((v, i, a) => a.indexOf(v) === i))
@@ -411,7 +443,7 @@ const pickError = ref('')
 const evTrackRef = ref(null)
 
 function getDisplayValue(paramKey) {
-  return props.values[paramKey] ?? baseValues[paramKey] ?? 0
+  return props.values[paramKey] ?? 0
 }
 
 function onChangeParam(p, value) {
@@ -424,7 +456,7 @@ function toggleKeyframe(paramKey) {
   if (props.kf.hasKeyframe(paramKey, frame)) {
     props.kf.removeKeyframe(paramKey, frame)
   } else {
-    const val = props.values[paramKey] ?? baseValues[paramKey] ?? 0
+    const val = props.values[paramKey] ?? 0
     props.kf.setKeyframe(paramKey, frame, val)
   }
 }
@@ -440,7 +472,7 @@ function onSliderSeek(frame) {
   if (audioEl && !props.kf.isPlaying.value) {
     audioEl.currentTime = props.kf.currentFrame.value / props.kf.fps.value
   }
-  const vals = props.kf.getAllValuesAtFrame(props.kf.currentFrame.value, baseValues)
+  const vals = props.kf.getKeyframedValuesAtFrame(props.kf.currentFrame.value)
   emit('apply-kf-values', vals)
 }
 
@@ -517,7 +549,7 @@ function onClear() {
   onStop()
   props.kf.clearAll()
   showEventPicker.value = false
-  emit('apply-kf-values', baseValues)
+  emit('reset-all')
 }
 
 function kfDominantEasing(frame) {
@@ -766,7 +798,7 @@ function clearEvents() {
 }
 
 function exportProject() {
-  const data = { version: 1, ...props.kf.toJSON() }
+  const data = { version: 2, model: props.modelKey, ...props.kf.toJSON() }
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
@@ -787,7 +819,8 @@ function onProjectSelected(e) {
       const data = JSON.parse(String(reader.result))
       if (!data || typeof data !== 'object') throw new Error('invalid project')
       props.kf.fromJSON(data)
-      emit('apply-kf-values', props.kf.getAllValuesAtFrame(props.kf.currentFrame.value, baseValues))
+      props.kf.remapParameters(props.paramGroups)
+      emit('apply-kf-values', props.kf.getKeyframedValuesAtFrame(props.kf.currentFrame.value))
       showHint('已导入 ' + file.name)
     } catch {
       showHint('导入失败：不是有效的工程 JSON')
@@ -1003,8 +1036,10 @@ function precision(step) {
   flex-shrink: 0;
 }
 .bb-group-tabs {
-  display: flex; padding: 4px 12px; gap: 2px; border-bottom: 1px solid #0f3460;
+  display: flex; flex-wrap: wrap; padding: 4px 12px; gap: 2px; border-bottom: 1px solid #0f3460;
 }
+.bb-param-tools { display:flex; align-items:center; gap:12px; padding:4px 12px; }
+.bb-param-tools :deep(.arco-checkbox-label) { color:#bbb; font-size:12px; }
 .bb-tab {
   color: #888; font-size: 12px; padding: 4px 12px; cursor: pointer;
   border-radius: 4px; transition: all 0.15s;
@@ -1017,10 +1052,10 @@ function precision(step) {
   max-height: 100px; overflow-y: auto;
 }
 .bb-param-row {
-  display: flex; align-items: center; width: 280px; flex-shrink: 0;
+  display: flex; align-items: center; width: 376px; flex-shrink: 0;
 }
 .bb-param-label {
-  color: #999; font-size: 12px; width: 56px; flex-shrink: 0;
+  color: #999; font-size: 12px; width: 100px; flex-shrink: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .bb-diamond {
@@ -1029,6 +1064,7 @@ function precision(step) {
 }
 .bb-diamond.active { color: #e94560; }
 .bb-diamond:hover { color: #e94560; }
+.bb-param-reset { margin-left: 6px; flex-shrink: 0; }
 
 /* Footer */
 .bb-footer {

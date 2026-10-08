@@ -1,6 +1,6 @@
 import { ref, reactive, readonly, watch } from 'vue'
 import { init as createL2D } from 'l2d'
-import { PARAM_GROUPS, initParamValues } from '../params.js'
+import { buildParamGroups, initParamValues, normalizeParamValues } from '../params.js'
 import { collectMotionInfo } from '../motions.js'
 import modelManifest from 'virtual:model-manifest'
 
@@ -16,7 +16,8 @@ const motionGroups = ref([])
 const currentMotion = ref('')
 const expressionIds = ref([])
 const currentExpression = ref('')
-const paramValues = reactive(initParamValues())
+const paramGroups = ref([])
+const paramValues = reactive({})
 const mouseTrackEnabled = ref(true)
 const motionPlaying = ref(false)
 const motionProgress = ref(0)
@@ -28,31 +29,22 @@ const motionDurations = ref({})
 
 const paramOverrides = reactive({})
 
-// 当前模型实际拥有的参数 id 集合。
-// 老模型用 PARAM_EYE_L_OPEN 这类命名，新模型（adv 系列）用 ParamEyeLOpen，
-// 直接下发不存在的 id 会每帧去写一个无效参数，所以下发前先过滤。
-let validParamIds = null
-
 function refreshValidParamIds() {
-  validParamIds = null
   if (!l2d) return
   try {
     const list = l2d.getParams()
     if (Array.isArray(list) && list.length > 0) {
-      validParamIds = new Set(list.map(item => item.id))
+      paramGroups.value = buildParamGroups(list)
+      for (const key of Object.keys(paramValues)) delete paramValues[key]
+      Object.assign(paramValues, initParamValues(paramGroups.value))
     }
   } catch {
-    // 拿不到参数表就不过滤，保持原来的行为
+    console.warn('[params] 无法读取模型参数表')
   }
 }
 
 function filterParams(params) {
-  if (!validParamIds) return { ...params }
-  const result = {}
-  for (const [key, value] of Object.entries(params)) {
-    if (validParamIds.has(key)) result[key] = value
-  }
-  return result
+  return normalizeParamValues(params, paramGroups.value)
 }
 
 function sendParams(params) {
@@ -279,6 +271,12 @@ async function loadModel(m, restore) {
   expressionIds.value = []
   motionDurations.value = {}
   motionCarriesExpression = {}
+  motionPlaying.value = false
+  motionLabel.value = ''
+  clearInterval(progressTimer)
+  paramGroups.value = []
+  for (const key of Object.keys(paramValues)) delete paramValues[key]
+  for (const key of Object.keys(paramOverrides)) delete paramOverrides[key]
 
   const cvs = document.getElementById('live2d-canvas')
   if (!cvs) { loading.value = false; return }
@@ -299,9 +297,9 @@ async function loadModel(m, restore) {
   if (requestId !== loadRequestId) return
   l2d.resize()
   // 模型加载会重建 SDK 内部的渲染委托，跟随监听要按当前开关重新对齐
-  applySdkMouseTracking()
   // 参数命名各代模型不同，先取当前模型的参数表，后面下发时据此过滤
   refreshValidParamIds()
+  applySdkMouseTracking()
   currentModel.value = category + '/' + name
   currentCategory.value = category
   statusText.value = '当前: ' + category + '/' + name
@@ -318,10 +316,12 @@ async function loadModel(m, restore) {
       setExpression(restore.expression)
     }
     if (restore.params) {
-      for (const [key, value] of Object.entries(restore.params)) {
-        if (key in paramValues) {
-          paramValues[key] = value
-        }
+      const restored = filterParams(restore.params)
+      const defaults = initParamValues(paramGroups.value)
+      for (const [key, value] of Object.entries(restored)) {
+        // 旧版本保存了整张面板，新版本只保存实际手控的参数。
+        if (restore.paramSchemaVersion === 2 || value !== defaults[key]) paramOverrides[key] = value
+        paramValues[key] = value
       }
       applyAllParams()
     }
@@ -377,17 +377,10 @@ function setExpression(e) {
 }
 
 function setParam(key, value) {
-  if (!(key in paramValues)) return
-  paramValues[key] = value
-  if (currentExpression.value) {
-    paramOverrides[key] = value
-  }
-  if (!l2d) return
-  if (currentExpression.value) {
-    sendParams({ [key]: value })
-  } else {
-    applyAllParams()
-  }
+  const values = filterParams({ [key]: value })
+  Object.assign(paramValues, values)
+  Object.assign(paramOverrides, values)
+  applyAllParams()
 }
 
 async function resetPose() {
@@ -403,7 +396,7 @@ async function resetPose() {
   motionProgress.value = 0
   clearInterval(progressTimer)
   for (const key of Object.keys(paramOverrides)) delete paramOverrides[key]
-  const defaults = initParamValues()
+  const defaults = initParamValues(paramGroups.value)
   for (const key of Object.keys(defaults)) {
     paramValues[key] = defaults[key]
   }
@@ -418,21 +411,22 @@ async function resetPose() {
   }
   motionGroups.value = Object.keys(l2d.getMotions())
   expressionIds.value = l2d.getExpressions()
-  applySdkMouseTracking()
   refreshValidParamIds()
+  applySdkMouseTracking()
 }
 
 function resetGroup(groupKey) {
-  const group = PARAM_GROUPS.find(g => g.key === groupKey)
+  const group = paramGroups.value.find(g => g.key === groupKey)
   if (!group) return
   for (const param of group.params) {
     paramValues[param.key] = param.default
+    delete paramOverrides[param.key]
   }
   if (l2d) applyAllParams()
 }
 
 function resetAllParams() {
-  const defaults = initParamValues()
+  const defaults = initParamValues(paramGroups.value)
   for (const key of Object.keys(defaults)) {
     paramValues[key] = defaults[key]
   }
@@ -442,7 +436,8 @@ function resetAllParams() {
 
 function applyAllParams() {
   if (!l2d) return
-  sendParams({ ...paramValues })
+  // 仅强制已编辑的参数；几百个默认参数全下发会冻结表情、物理和手臂动作。
+  sendParams({ ...paramOverrides })
 }
 
 /**
@@ -450,7 +445,7 @@ function applyAllParams() {
  *
  * SDK 的 setParams 是"整组覆盖"，被覆盖的参数每帧都会在动作更新之后写回，
  * 因此动作一旦播放，之前下发的整套参数会把它自带的面部变化全部压住。
- * 有表情时只强制用户改过的那几个参数，其余交给表情和动作。
+ * 只强制用户改过或有关键帧的参数，其余交给表情、动作与物理。
  */
 function applyForcedParams() {
   if (!l2d) return
@@ -459,23 +454,14 @@ function applyForcedParams() {
 }
 
 function setAllParams(values) {
-  for (const key of Object.keys(values)) {
-    if (key in paramValues) {
-      paramValues[key] = values[key]
-    }
-  }
-  if (l2d) applyAllParams()
+  applyKfParams(values)
 }
 
 function applyKfParams(values) {
-  for (const key of Object.keys(values)) {
-    if (key in paramValues) {
-      paramValues[key] = values[key]
-    }
-  }
-  if (l2d && Object.keys(values).length > 0) {
-    sendParams({ ...values })
-  }
+  const resolved = filterParams(values)
+  Object.assign(paramValues, resolved)
+  Object.assign(paramOverrides, resolved)
+  applyAllParams()
 }
 
 function applyMouseTrack(x, y, cvs) {
@@ -491,7 +477,7 @@ function applyMouseTrack(x, y, cvs) {
     p.PARAM_ANGLE_Y = dx * 15
     sendParams(p)
   } else {
-    const p = { ...paramValues }
+    const p = { ...paramOverrides }
     p.PARAM_ANGLE_X = dy * 15
     p.PARAM_ANGLE_Y = dx * 15
     sendParams(p)
@@ -515,7 +501,8 @@ function saveState() {
       model: currentModel.value,
       motion: currentMotion.value,
       expression: currentExpression.value,
-      params: { ...paramValues },
+      params: { ...paramOverrides },
+      paramSchemaVersion: 2,
       mouseTrack: mouseTrackEnabled.value,
       scale: modelScale.value,
     }))
@@ -555,6 +542,7 @@ export function useModel() {
     expressionIds: readonly(expressionIds),
     currentExpression: readonly(currentExpression),
     paramValues,
+    paramGroups: readonly(paramGroups),
     mouseTrackEnabled,
     motionPlaying: readonly(motionPlaying),
     motionProgress: readonly(motionProgress),

@@ -18,6 +18,8 @@
       <div class="canvas-sep"></div>
       <BottomBar
         :values="paramValues"
+        :paramGroups="paramGroups"
+        :modelKey="currentModel"
         :kf="kf"
         :motionGroups="motionGroups"
         :expressionIds="expressionIds"
@@ -31,6 +33,7 @@
         v-model:scale="scalePercent"
         :getViewRect="getViewRect"
         @set-param="onSetParam"
+        @reset-param="onResetParam"
         @reset-group="resetGroup"
         @reset-all="resetAllParams"
         @apply-kf-values="applyKfParams"
@@ -68,13 +71,19 @@ import BottomBar from './components/BottomBar.vue'
 const {
   models, currentModel, loading,
   motionGroups, currentMotion, expressionIds, currentExpression,
-  paramValues, mouseTrackEnabled, motionPlaying, motionProgress, motionLabel, motionRemain, motionDurations, toastMsg,
+  paramValues, paramGroups, mouseTrackEnabled, motionPlaying, motionProgress, motionLabel, motionRemain, motionDurations, toastMsg,
   loadModel, playMotion, setExpression, resetPose, setParam, resetGroup, resetAllParams, setAllParams, applyKfParams,
   applyMouseTrack, getSavedState, destroy,
   modelScale, setModelScale,
 } = useModel()
 
 const kf = useKeyframeAnimation()
+
+watch(currentModel, model => {
+  if (!model) return
+  kf.remapParameters(paramGroups.value)
+  applyKfParams(kf.getKeyframedValuesAtFrame(kf.currentFrame.value))
+})
 
 const KF_STORAGE_KEY = 'tomori-kf-state'
 
@@ -125,6 +134,13 @@ function onSetParam(key, value) {
     kf.setKeyframe(key, kf.currentFrame.value, value)
     debouncedSaveKf()
   }
+}
+
+function onResetParam(key, value) {
+  if (kf.isPlaying.value) return
+  kf.removeKeyframe(key, kf.currentFrame.value)
+  setParam(key, value)
+  debouncedSaveKf()
 }
 
 function onCanvasMouse(x, y, cvs) {

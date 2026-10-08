@@ -1,4 +1,5 @@
 import { ref, reactive, computed } from 'vue'
+import { resolveParamId } from '../params.js'
 
 const DEFAULT_FPS = 30
 const DEFAULT_DURATION = 3
@@ -245,6 +246,18 @@ export function useKeyframeAnimation() {
     return Object.keys(keyframes).filter(k => keyframes[k].length > 0)
   }
 
+  function remapParameters(groups) {
+    for (const source of Object.keys(keyframes)) {
+      const target = resolveParamId(source, groups)
+      if (!target || target === source) continue
+      // 已有真实 ID 的同帧数据优先；未对应的轨道保留，切回旧模型仍能使用。
+      const merged = new Map((keyframes[target] || []).map(kf => [kf.frame, kf]))
+      for (const kf of keyframes[source]) if (!merged.has(kf.frame)) merged.set(kf.frame, kf)
+      keyframes[target] = [...merged.values()].sort((a, b) => a.frame - b.frame)
+      delete keyframes[source]
+    }
+  }
+
   function getAllKeyframes() {
     const result = []
     for (const paramKey of Object.keys(keyframes)) {
@@ -415,6 +428,7 @@ export function useKeyframeAnimation() {
     getKfEasing, cycleEasingAtFrame, getEasingLabel,
     getKeyframesForParam, getValueAtFrame, getAllValuesAtFrame, getKeyframedValuesAtFrame,
     getAllKeyframedParams, getAllKeyframes, getUniqueFramePositions,
+    remapParameters,
     goToFrame, goToStart, goToEnd,
     goToPrevKeyframe, goToNextKeyframe,
     play, pause, stop, setDuration, setFps,
