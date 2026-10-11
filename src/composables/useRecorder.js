@@ -158,7 +158,7 @@ export function useRecorder() {
     setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 
-  function start(sourceCanvas, audioEl, nextMode = 'canvas', getBackground = null, getViewRect = null) {
+  function start(sourceCanvas, audioEl, nextMode = 'canvas', getBackground = null, getViewRect = null, fps = RECORD_FPS) {
     if (!canRecord.value || isRecording.value || !sourceCanvas) return false
 
     mode = nextMode === 'portrait' ? 'portrait' : 'canvas'
@@ -174,7 +174,7 @@ export function useRecorder() {
     outCtx = outCvs.getContext('2d')
 
     try {
-      const stream = outCvs.captureStream(RECORD_FPS)
+      const stream = outCvs.captureStream([24, 30, 60].includes(fps) ? fps : RECORD_FPS)
       if (audioDest) {
         const audioTrack = audioDest.stream.getAudioTracks()[0]
         if (audioTrack) stream.addTrack(audioTrack)
