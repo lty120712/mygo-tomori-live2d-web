@@ -1,4 +1,5 @@
 import { uid } from './sceneProject.js'
+import { ASSET_STORE, openLocalDb, withStore } from './localStore.js'
 
 export const ASSET_LIMITS = { image: 64 * 1024 * 1024, audio: 512 * 1024 * 1024 }
 
@@ -31,55 +32,13 @@ export function memoryBackend() {
   }
 }
 
-// IndexedDB 后端：浏览器默认
+// IndexedDB 后端：浏览器默认，与工程文档共用 localStore 里的统一数据库
 function indexedDbBackend() {
-  let db = null
-  function open() {
-    if (db) return Promise.resolve(db)
-    return new Promise((resolve, reject) => {
-      const req = indexedDB.open('tomori-assets', 1)
-      req.onupgradeneeded = () => {
-        if (!req.result.objectStoreNames.contains('assets')) req.result.createObjectStore('assets')
-      }
-      req.onsuccess = () => { db = req.result; resolve(db) }
-      req.onerror = () => reject(req.error)
-    })
-  }
   return {
-    async list() {
-      const d = await open()
-      return new Promise((resolve, reject) => {
-        const r = d.transaction('assets').objectStore('assets').getAll()
-        r.onsuccess = () => resolve(r.result || [])
-        r.onerror = () => reject(r.error)
-      })
-    },
-    async put(id, meta, blob) {
-      const d = await open()
-      return new Promise((resolve, reject) => {
-        const tx = d.transaction('assets', 'readwrite')
-        tx.objectStore('assets').put({ id, meta, blob }, id)
-        tx.oncomplete = () => resolve()
-        tx.onerror = () => reject(tx.error)
-      })
-    },
-    async get(id) {
-      const d = await open()
-      return new Promise((resolve, reject) => {
-        const r = d.transaction('assets').objectStore('assets').get(id)
-        r.onsuccess = () => resolve(r.result)
-        r.onerror = () => reject(r.error)
-      })
-    },
-    async delete(id) {
-      const d = await open()
-      return new Promise((resolve, reject) => {
-        const tx = d.transaction('assets', 'readwrite')
-        tx.objectStore('assets').delete(id)
-        tx.oncomplete = () => resolve()
-        tx.onerror = () => reject(tx.error)
-      })
-    },
+    async list() { return (await withStore(await openLocalDb(), ASSET_STORE, 'readonly', store => store.getAll())) || [] },
+    async put(id, meta, blob) { await withStore(await openLocalDb(), ASSET_STORE, 'readwrite', store => store.put({ id, meta, blob }, id)) },
+    async get(id) { return (await withStore(await openLocalDb(), ASSET_STORE, 'readonly', store => store.get(id))) ?? null },
+    async delete(id) { await withStore(await openLocalDb(), ASSET_STORE, 'readwrite', store => store.delete(id)) },
   }
 }
 

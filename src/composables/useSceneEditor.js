@@ -1,5 +1,6 @@
 import { visualClips, createImageClip, appendVisualClips, visualClipLimit, backgroundAtTime, backgroundClipLimit, createColorBackgroundClip, createImageBackgroundClip, planBackgroundAdd, migrateLegacyBackground } from '../mediaTracks.js'
 import { assetStore } from '../assetStore.js'
+import { LEGACY_SCENE_KEY, SCENE_KEY, localStore, restoreScene } from '../localStore.js'
 import {sampleTimelinePose} from '../timelinePose.js'
 import {applyCanvasSelection} from '../canvasSelection.js'
 import {sceneParameterOverrides} from '../sceneParameterPriority.js'
@@ -217,29 +218,32 @@ export function useSceneEditor() {
     try{asset=await prepareLegacyBackground()}catch(error){message.value='背景图片迁移失败：'+error.message}
     if(locked.value)return
     history.end()
-    history.edit(()=>mutate(asset))
+    // 迁移素材在校验之前就准备好了：编辑被拒绝时把它删掉，避免留下没人引用的重复素材。
+    history.edit(()=>{const applied=mutate(asset)!==false;if(!applied && asset)assetStore.remove(asset.id).catch(()=>{})})
   }
   function placeBackgroundClip(clip,legacyAsset){
     const limit=backgroundClipLimit(project.backgroundClips)
-    if(limit){message.value=limit;return}
+    if(limit){message.value=limit;return false}
     const plan=planBackgroundAdd(project.backgroundClips,clip,{duration:project.duration,fps:project.fps})
-    if(plan.error){message.value=plan.error;return}
+    if(plan.error){message.value=plan.error;return false}
     // 迁移出来的旧背景图只填补空档，因此第一次添加不会撞上自己。
     if(legacyAsset)migrateLegacyBackground(project,legacyAsset,plan.clip)
     project.backgroundClips.push(plan.clip)
     message.value=plan.clip.kind==='color' ? '已在播放头添加纯色背景片段' : '已在播放头添加背景图片片段：'+plan.clip.name
+    return true
   }
   const addBackgroundColor=color=>withBackgroundEdit(legacy=>placeBackgroundClip(createColorBackgroundClip(color,backgroundStart(),backgroundLength(backgroundStart())),legacy))
   const addBackgroundImage=asset=>withBackgroundEdit(legacy=>placeBackgroundClip(createImageBackgroundClip(asset,backgroundStart(),backgroundLength(backgroundStart())),legacy))
   function editBackground(id,patch){
-    const clip=project.backgroundClips.find(c=>c.id===id);if(!clip)return
+    const clip=project.backgroundClips.find(c=>c.id===id);if(!clip)return false
     if(patch.color!==undefined){if(clip.kind==='color' && /^#[0-9a-f]{6}$/i.test(patch.color))clip.color=patch.color;return}
     const min=1/project.fps,round=value=>Math.round(value*project.fps)/project.fps
     const start=round(Math.max(0,Math.min(project.duration-min,patch.start ?? clip.start)))
     const length=round(Math.max(min,Math.min(project.duration-start,patch.duration ?? clip.duration)))
-    if(start+length>project.duration+1e-8){message.value='背景片段不能超出工程时长';return}
-    if(project.backgroundClips.some(c=>c.id!==id && start<c.start+c.duration-1e-8 && start+length>c.start+1e-8)){message.value='背景片段不能重叠；请先调整相邻片段';return}
+    if(start+length>project.duration+1e-8){message.value='背景片段不能超出工程时长';return false}
+    if(project.backgroundClips.some(c=>c.id!==id && start<c.start+c.duration-1e-8 && start+length>c.start+1e-8)){message.value='背景片段不能重叠；请先调整相邻片段';return false}
     clip.start=start;clip.duration=length
+    return true
   }
   // 取色器连续触发 input，交给 history 的手势合并成一步撤销（菜单里用 begin-edit / end-edit 包住）。
   const editBackgroundAction=(id,patch)=>{
@@ -457,24 +461,37 @@ export function useSceneEditor() {
     const file=event.target.files?.[0];event.target.value='';if(!file || locked.value)return
     try{const data=JSON.parse(await file.text());if(locked.value)return;history.end();history.edit(()=>replaceProject(data));message.value='已导入场景工程'}catch(e){message.value='导入失败：'+e.message}
   }
-  let saveTimer=null,initialized=false
-  function saveProject(){
-    if(!initialized)return
+  let saveTimer=null,initialized=false,sceneStoreBlocked=false
+  async function saveProject(){
+    if(!initialized || sceneStoreBlocked)return
     clearTimeout(saveTimer)
-    try{localStorage.setItem('tomori-scene-v2',JSON.stringify(project))}catch{message.value='本地保存失败，请导出工程备份'}
+    const saved=await localStore.set(SCENE_KEY,snapshot(project))
+    if(!saved)message.value='保存工程失败，请导出工程备份'
   }
-  watch(project,()=>{drive();if(!initialized)return;clearTimeout(saveTimer);saveTimer=setTimeout(saveProject,400)},{deep:true})
+  function flushScene(){clearTimeout(saveTimer);saveProject()}
+  function onVisibilityChange(){if(document.visibilityState==='hidden')flushScene()}
+  function readLegacyScene(){
+    try{const raw=localStorage.getItem(LEGACY_SCENE_KEY);return raw ? JSON.parse(raw) : null}catch{return null}
+  }
+  function clearLegacyScene(){try{localStorage.removeItem(LEGACY_SCENE_KEY)}catch{}}
+  watch(project,()=>{drive();if(!initialized)return;clearTimeout(saveTimer);saveTimer=setTimeout(saveProject,300)},{deep:true})
   watch(selectedId,()=>{clearLivePreview();previewMotionName.value='';previewExpressionName.value='';paramSearch.value='';allParams.value=false;drive()})
-  onMounted(()=>{
+  onMounted(async ()=>{
     window.addEventListener('keydown',shortcut)
-    window.addEventListener('pagehide',saveProject)
-    try{
-      const saved=localStorage.getItem('tomori-scene-v2')
-      if(saved)replaceProject(JSON.parse(saved))
-
-    }catch(e){message.value='恢复工程失败：'+e.message}
+    window.addEventListener('pagehide',flushScene)
+    document.addEventListener('visibilitychange',onVisibilityChange)
+    // 工程统一存在 IndexedDB 的 documents 仓库；只有数据库为空时才读一次旧的 localStorage 数据。
+    const restored=await restoreScene({store:localStore,readLegacy:readLegacyScene,clearLegacy:clearLegacyScene})
+    if(!restored.ok){
+      // 读不到就不要再写，避免用空工程覆盖数据库里已保存的内容。
+      sceneStoreBlocked=true
+      message.value='读取浏览器数据库失败（'+(restored.error?.message || '原因未知')+'）：本次修改不会自动保存，请导出工程备份'
+    }else{
+      if(restored.project)replaceProject(restored.project)
+      if(restored.migrated)message.value='工程已迁移到浏览器数据库，不再使用本地存储'
+    }
     initialized=true
   })
-  onBeforeUnmount(()=>{window.removeEventListener('keydown',shortcut);window.removeEventListener('pagehide',saveProject);pause();clearInterval(previewTimer);saveProject();recorder.destroy()})
+  onBeforeUnmount(()=>{window.removeEventListener('keydown',shortcut);window.removeEventListener('pagehide',flushScene);document.removeEventListener('visibilitychange',onVisibilityChange);pause();clearInterval(previewTimer);flushScene();recorder.destroy()})
   return {allClips,imageStatus,missingImages,missingBackgrounds,addImage:editable(addImage),addBackgroundColor,addBackgroundImage,editBackground:editBackgroundAction,deleteBackground:deleteBackgroundAction,sceneTimeline,selectTimeline,changeAspectRatio:editable(changeAspectRatio),canvasSelection,selectCanvas,batchCanvasTransform:editable(batchCanvasTransform),batchClips:editable(batchClips),editLocked,changeLayerState:editable(changeLayerState),project,runtimes,selectedId,playing,loopPlayback,message,paramSearch,allParams,autoTransform,sceneCanvas,projectInput,recorder,locked,time,selected,runtime,loading,canSplit,selectedPose,paramLabels,assetModels:models,visibleParams,transformFields,hasKey,previewMotionName,previewExpressionName,activePreview,previewMotionInfo,previewProgress,preview,resetPreview,endPreview,mouseMoved,changeMouseTrack:editable(changeMouseTrack),addChosenEvent:editable(addChosenEvent),canUndo,canRedo,undo,redo,beginEdit,endEdit,renameClip:editable(renameClip,true),changeBackground:editable(changeBackground,true),backgroundInput,backgroundLoading,uploadingBackground,uploadBackground,removeBackgroundImage:editable(removeBackgroundImage),resetBackground:editable(resetBackground),addModel:editable(addModel),renameLayer:editable(renameLayer),reorderLayer:editable(reorderLayer),editClip:editable(editClip,true),editTiming:editable(editTiming,true),editTransform:editable(editTransform,true),resetPlacement:editable(resetPlacement),moveModel:editable(moveModel),transformModel:editable(transformModel),editParam:editable(editParam,true),resetParam:editable(resetParam),toggleKey:editable(toggleKey),removeKey:editable(removeKey),moveKey:editable(moveKey),batchKeys:editable(batchKeys),editKeyValue:editable(editKeyValue,true),editEvent:editable(editEvent),pasteEvent:editable(pasteEvent),removeEvent:editable(removeEvent),duplicate:editable(duplicate),split:editable(split),deleteSelected:editable(deleteSelected),runtimeReady,disposeRuntime,runtimeError,addEvent:editable(addEvent),play,pause,seek,stop,changeDuration:editable(changeDuration,true),changeFps:editable(changeFps),record,exportProject,importProject}
 }

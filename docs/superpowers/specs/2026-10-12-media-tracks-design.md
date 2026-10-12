@@ -121,6 +121,8 @@ asset = {
 - 接口：`initAssetStore()` / `listAssets()` / `putAsset(blob, meta)` / `getAssetBlob(id)` / `removeAsset(id)` / `assetObjectUrl(id)`。
 - 为可测试性，存储后端可注入（默认 IndexedDB，测试用内存 Map）。
 
+补充（M3 完成后）：`src/localStore.js` 统一打开数据库 `tomori-assets`（版本 2，`assets` + `documents` 两个仓库）。工程文档写进 `documents`，工程自动保存不再使用 localStorage；旧 `tomori-scene-v2` 只在首次打开且数据库为空时读取一次，写入成功后删除。数据库不可用或升级被其它标签页占用时提示并暂停自动保存，避免覆盖已保存内容。
+
 ### 5.2 src/mediaTracks.js
 
 职责：图片 / 背景 / 音频片段的时间线纯函数（无副作用，便于单测）。
