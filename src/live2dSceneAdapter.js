@@ -106,3 +106,24 @@ export function resetModelPose(sdk) {
     }
   }
 }
+
+const parameterId=id=>typeof id==='string' ? id : id?.getString?.()?.s ?? id?.getString?.() ?? ''
+function vectorItems(vector){return Array.isArray(vector) ? vector : vector?.getSize ? Array.from({length:vector.getSize()},(_,i)=>vector.at(i)) : []}
+export function expressionParameterIds(sdk,name){
+  if(!name)return []
+  const ids=[]
+  const legacy=sdk?._state?.l2d2Model?.live2DMgr?.getModel()?.expressions?.[name]
+  for(const p of legacy?.paramList || [])ids.push(parameterId(p.id))
+  for(const delegate of sdk?._state?.l2d6Model?._subdelegates || [])for(const model of delegate.getLive2DManager()?._models || []){
+    const expression=model._expressions?.get(name)
+    for(const p of vectorItems(expression?.getExpressionParameters?.()))ids.push(parameterId(p.parameterId))
+  }
+  return [...new Set(ids.filter(Boolean))]
+}
+export function motionEffectParameterIds(sdk,effects=[]){
+  const ids=[]
+  for(const delegate of sdk?._state?.l2d6Model?._subdelegates || [])for(const model of delegate.getLive2DManager()?._models || []){
+    for(const [effect,key] of [['EyeBlink','_eyeBlinkIds'],['LipSync','_lipSyncIds']])if(effects.includes(effect))ids.push(...vectorItems(model[key]).map(parameterId))
+  }
+  return ids.filter(Boolean)
+}

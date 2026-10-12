@@ -73,6 +73,8 @@ async function readMotionInfo(url) {
       const duration = json?.Meta?.Duration
       const pairs = (json?.Curves || []).map(curve => ({ name: curve.Id, values: motion3Values(curve.Segments || []) }))
       return {
+        parameterIds:(json?.Curves || []).filter(c=>c.Target==='Parameter').map(c=>c.Id),
+        effects:(json?.Curves || []).filter(c=>c.Target==='Model' && ['EyeBlink','LipSync'].includes(c.Id)).map(c=>c.Id),
         seconds: Number.isFinite(duration) && duration > 0 ? duration : null,
         carriesExpression: carriesExpression(pairs),
       }
@@ -85,7 +87,7 @@ async function readMotionInfo(url) {
       if (eq <= 0 || line.startsWith('$')) continue
       pairs.push({ name: line.slice(0, eq), values: line.slice(eq + 1).split(',').map(Number) })
     }
-    return { seconds: parseMtnDuration(text), carriesExpression: carriesExpression(pairs) }
+    return { seconds: parseMtnDuration(text), carriesExpression: carriesExpression(pairs),parameterIds:pairs.map(p=>p.name),effects:[] }
   } catch {
     return null
   }
@@ -109,6 +111,8 @@ export async function collectMotionInfo(modelUrl, motions) {
       const seconds = valid.map(i => i.seconds).filter(v => typeof v === 'number' && v > 0)
       if (seconds.length === 0 && valid.length === 0) return
       result[group] = {
+        parameterIds:[...new Set(valid.flatMap(i=>i.parameterIds || []))],
+        effects:[...new Set(valid.flatMap(i=>i.effects || []))],
         seconds: seconds.length > 0 ? Math.max(...seconds) : null,
         // 该组只要有一个候选动作自带表情，就认为不需要外挂表情
         carriesExpression: valid.some(i => i.carriesExpression),

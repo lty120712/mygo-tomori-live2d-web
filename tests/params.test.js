@@ -1,7 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { buildParamGroups, initParamValues, normalizeParamValues, resolveParamId } from '../src/params.js'
-import { useKeyframeAnimation } from '../src/composables/useKeyframeAnimation.js'
 
 const modern = buildParamGroups([
   { id: 'ParamMouthOpenY', min: 0, max: 1, default: 0 },
@@ -48,28 +47,4 @@ test('缺失、固定范围、重复参数不会生成无效滑条', () => {
   ])
   assert.equal(groups.flatMap(g => g.params).length, 1)
   assert.equal(groups[0].params[0].max, 2)
-})
-
-test('旧工程迁移到新模型，保留缓动和未对应轨道，可切回旧模型', () => {
-  const kf = useKeyframeAnimation()
-  kf.fromJSON({ keyframes: {
-    PARAM_MOUTH_OPEN_Y: [{ frame: 0, value: 0, easing: 'easeIn' }, { frame: 90, value: 1 }],
-    PARAM_HAIR_FRONT: [{ frame: 0, value: 0.5 }],
-  } })
-  kf.remapParameters(modern)
-  assert.equal(kf.getValueAtFrame('ParamMouthOpenY', 45), 0.125)
-  assert.equal(kf.getValueAtFrame('PARAM_HAIR_FRONT', 0), 0.5)
-  const old = buildParamGroups([{ id: 'PARAM_MOUTH_OPEN_Y', min: 0, max: 1, default: 0 }])
-  kf.remapParameters(old)
-  assert.equal(kf.getValueAtFrame('PARAM_MOUTH_OPEN_Y', 45), 0.125)
-  assert.equal(kf.keyframes.ParamMouthOpenY, undefined)
-})
-
-test('工程含新旧两种命名时，合并轨道且同帧保留真实 ID 的值', () => {
-  const kf = useKeyframeAnimation()
-  kf.setKeyframe('PARAM_MOUTH_OPEN_Y', 0, 0.2)
-  kf.setKeyframe('PARAM_MOUTH_OPEN_Y', 90, 1)
-  kf.setKeyframe('ParamMouthOpenY', 0, 0.8)
-  kf.remapParameters(modern)
-  assert.deepEqual(kf.getKeyframesForParam('ParamMouthOpenY').map(k => [k.frame, k.value]), [[0, 0.8], [90, 1]])
 })

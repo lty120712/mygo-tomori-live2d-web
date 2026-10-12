@@ -5,11 +5,11 @@ export function modelBounds(pose) {
   const halfHeight=(Math.abs(Math.sin(angle))*160+Math.abs(Math.cos(angle))*255)*pose.scale
   return {x:[pose.x-halfWidth,pose.x,pose.x+halfWidth],y:[pose.y-halfHeight,pose.y,pose.y+halfHeight]}
 }
-export function snapCanvasPosition(pose,position,others=[],threshold=8,disabled=false) {
+export function snapCanvasPosition(pose,position,others=[],threshold=8,disabled=false,size={width:960,height:540}) {
   const result={x:Math.max(-1920,Math.min(1920,position.x)),y:Math.max(-1080,Math.min(1080,position.y))}
   const guides=[]
   if(disabled)return {position:result,guides}
-  const bounds=modelBounds({...pose,...result}),targets={x:[-480,0,480],y:[-270,0,270]}
+  const bounds=modelBounds({...pose,...result}),targets={x:[-size.width/2,0,size.width/2],y:[-size.height/2,0,size.height/2]}
   for(const other of others){const b=modelBounds(other);targets.x.push(...b.x);targets.y.push(...b.y)}
   for(const axis of ['x','y']){
     let nearest=null

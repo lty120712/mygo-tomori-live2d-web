@@ -1,8 +1,11 @@
+import {applyCanvasSelection} from '../canvasSelection.js'
+import {sceneParameterOverrides} from '../sceneParameterPriority.js'
+import {expressionParameterIds,motionEffectParameterIds} from '../live2dSceneAdapter.js'
 import { resetCanvasPlacement } from '../resetCanvasPlacement.js'
 import { playbackFrame } from '../scenePlayback.js'
 import { reorderSceneLayer,insertFrontLayer,setLayerState,canEditClips } from '../sceneLayers.js'
 import { applyClipStarts,planClipPaste,planClipSplit } from '../clipSelection.js'
-import { activeEvent, planEventEdit } from '../timelineEvents.js'
+import { activeEvent, planEventEdit,linkedExpressionMotion } from '../timelineEvents.js'
 import { ref, reactive, shallowReactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import models from 'virtual:model-manifest'
 import { useRecorder } from './useRecorder.js'
@@ -16,13 +19,15 @@ import { createProject, createClip, readProject, clipVisible, localFrame, sample
 
 export function useSceneEditor() {
   const project = reactive(createProject()), runtimes = shallowReactive({}), previewOverrides = reactive({})
+  const canvasSelection=ref([])
   const selectedId = ref(''), frame = ref(0), playing = ref(false), message = ref('')
   const loopPlayback=ref(false)
-  const assetSearch = ref(''), paramSearch = ref(''), allParams = ref(false), autoTransform = ref(false)
+  const paramSearch = ref(''), allParams = ref(false), autoTransform = ref(false)
   const previewProgress=ref(null)
   let previewTimer=null
   const previewMotionName=ref(''),previewExpressionName=ref(''),activePreview=ref('')
   let mousePosition=null
+  const sceneTimeline=ref(null)
   const sceneCanvas = ref(null), projectInput = ref(null), backgroundInput = ref(null), backgroundLoading = ref(false), uploadingBackground = ref(false), recorder = useRecorder()
   const locked = computed(()=>playing.value || recorder.isRecording.value)
   const time = computed(()=>frame.value/project.fps)
@@ -40,7 +45,6 @@ export function useSceneEditor() {
   }
   const selectedPose = computed(()=>selected.value ? sampleState(selected.value) : {params:{},transform:{}})
   const paramLabels = computed(()=>Object.fromEntries([['@x','位置 X'],['@y','位置 Y'],['@scale','缩放'],['@rotation','旋转'],['@opacity','透明度'],...(runtime.value?.groups || []).flatMap(g=>g.params.map(p=>[p.key,p.label]))]))
-  const filteredModels = computed(()=>models.filter(m=>(m.category+' '+m.name).toLowerCase().includes(assetSearch.value.toLowerCase())))
   const visibleParams = computed(()=> {
     const query=paramSearch.value.trim().toLowerCase()
     return (runtime.value?.groups || []).flatMap(g=>g.params).filter(p=>query ? (p.label+' '+p.key).toLowerCase().includes(query) : allParams.value || p.common)
@@ -49,11 +53,12 @@ export function useSceneEditor() {
   const snapshot = value => JSON.parse(JSON.stringify(value))
   const historyRevision = ref(0)
   const history = createEditHistory({
-    capture: () => snapshot({project, overrides:previewOverrides, selectedId:selectedId.value, frame:frame.value}),
+    capture: () => snapshot({project, overrides:previewOverrides, selectedId:selectedId.value, canvasSelection:canvasSelection.value, frame:frame.value}),
     restore: state => {
       clearLivePreview()
       Object.assign(project,snapshot(state.project));clearPreviewOverrides()
       Object.assign(previewOverrides,snapshot(state.overrides))
+      canvasSelection.value=(state.canvasSelection || [state.selectedId]).filter(id=>project.clips.some(c=>c.id===id))
       selectedId.value=project.clips.some(c=>c.id===state.selectedId) ? state.selectedId : project.clips[0]?.id || ''
       frame.value=Math.min(state.frame,Math.round(project.duration*project.fps));drive()
     },
@@ -71,6 +76,7 @@ export function useSceneEditor() {
     let ids=[]
     if(selectedEdits.includes(fn) && selected.value)ids=[selected.value.id]
     if([editClip,moveModel,transformModel].includes(fn))ids=[args[0]]
+    if(fn===batchCanvasTransform)ids=args[0].map(e=>e.id)
     if(fn===batchKeys)ids=(args[1]?.type==='paste' ? args[1].entries : args[0]).map(item=>item.clipId)
     if(fn===batchClips && args[0].type!=='paste')ids=args[0].type==='move' ? args[0].entries.map(e=>e.id) : args[0].ids
     if([renameLayer,reorderLayer].includes(fn))ids=project.clips.filter(c=>c.track===args[0]).map(c=>c.id)
@@ -79,12 +85,13 @@ export function useSceneEditor() {
     clearLivePreview()
     return history.edit(()=>fn(...args),merge ? fn.name+':'+selectedId.value+':'+frame.value+':'+(args[0]?.key ?? args[0]) : undefined)
   }
+  function changeAspectRatio(value){if(['16:9','9:16'].includes(value))project.aspectRatio=value}
   function renameClip(value){if(selected.value)selected.value.name=value}
   function changeMouseTrack(enabled){if(selected.value)selected.value.mouseTrack=enabled}
   function clearLivePreview() {
     clearInterval(previewTimer);previewTimer=null;previewProgress.value=null
     let cleared=false
-    for(const r of Object.values(runtimes))if(r.livePreview){r.livePreview=false;stopModelMotion(r.sdk);r.expression='';cleared=true}
+    for(const r of Object.values(runtimes))if(r.livePreview){r.livePreview=false;resetModelPose(r.sdk);r.expression='';cleared=true}
     activePreview.value=''
     if(cleared)drive()
   }
@@ -116,7 +123,7 @@ export function useSceneEditor() {
     if(type==='motion') {
       r.sdk.playMotion(name,undefined,3)
       const seconds=r.info[name]?.seconds
-      if(seconds){const started=performance.now();previewProgress.value={duration:seconds,elapsed:0};previewTimer=setInterval(()=>{const elapsed=Math.min(seconds,(performance.now()-started)/1000);previewProgress.value={duration:seconds,elapsed};if(elapsed>=seconds){clearInterval(previewTimer);previewTimer=null;activePreview.value='动作预览已结束：'+name}},50)}
+      if(seconds){const started=performance.now();previewProgress.value={duration:seconds,elapsed:0};previewTimer=setInterval(()=>{const elapsed=Math.min(seconds,(performance.now()-started)/1000);previewProgress.value={duration:seconds,elapsed};if(elapsed>=seconds){clearLivePreview();drive();activePreview.value='动作预览已结束：'+name}},50)}
       const target=name.replace(/^mtn_/i,'').replace(/_[clr]$/i,'')
       const paired=r.expressions.find(e=>e.replace(/^exp_/i,'').replace(/\.exp3?$/i,'')===target)
       if(paired && !r.info[name]?.carriesExpression){r.sdk.setExpression(paired);r.expression=paired}
@@ -153,18 +160,19 @@ export function useSceneEditor() {
   watch(()=>project.backgroundImage,value=>{backgroundLoading.value=!!value},{flush:'sync'})
   function shortcut(event) {
     if(event.defaultPrevented || event.isComposing || event.target?.closest?.('input,textarea,select,[contenteditable]'))return
+    if(event.key==='Escape'){sceneTimeline.value?.clearSelection();selectCanvas([]);event.preventDefault();return}
+    if(sceneTimeline.value?.modelShortcut(event))return
     if(event.key==='Delete' && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
-      if(!selected.value || locked.value)return
+      if(!canvasSelection.value.length || locked.value)return
       event.preventDefault()
       if(event.repeat)return
-      history.end();history.edit(deleteSelected)
+      history.end();editable(batchClips)({type:'delete',ids:[...canvasSelection.value]})
       return
     }
     if(event.code==='Space' && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
       event.preventDefault()
       if(event.repeat || loading.value || recorder.isRecording.value)return
-      history.end()
-      playing.value ? pause() : play()
+      history.end();playing.value ? pause() : play()
       return
     }
     if(!(event.ctrlKey || event.metaKey) || event.altKey)return
@@ -182,25 +190,25 @@ export function useSceneEditor() {
     const start=Math.min(time.value,project.duration-1/project.fps)
     const clip=createClip(model,start,Math.min(5,project.duration-start),insertFrontLayer(project.clips))
     clip.transform.x=project.clips.length%2 ? 190 : -190
-    project.clips.push(clip);selectedId.value=clip.id
+    project.clips.push(clip);selectCanvas([clip.id],clip.id)
   }
   function renameLayer(track,value){const name=String(value).trim().slice(0,100);if(!name)return;for(const clip of project.clips.filter(c=>c.track===track))clip.layerName=name}
   function changeLayerState(track,patch){setLayerState(project.clips,track,patch);drive()}
   function reorderLayer(from,to){reorderSceneLayer(project.clips,from,to)}
   function batchClips(action){
     if(action.type==='move'){if(!applyClipStarts(project.clips,action.entries,project.duration,project.fps))message.value='整组移动不能越界或与同轨道片段重叠'}
-    else if(action.type==='delete'){const ids=new Set(action.ids);project.clips=project.clips.filter(c=>!ids.has(c.id));if(ids.has(selectedId.value))selectedId.value=project.clips[0]?.id || ''}
+    else if(action.type==='delete'){const ids=new Set(action.ids);project.clips=project.clips.filter(c=>!ids.has(c.id));canvasSelection.value=canvasSelection.value.filter(id=>!ids.has(id));if(ids.has(selectedId.value))selectedId.value=canvasSelection.value.at(-1) || ''}
     else if(action.type==='split'){
       const plan=planClipSplit(project.clips,action.ids,time.value)
       if(plan.error){message.value=plan.error;return}
       for(const left of plan.left)project.clips.find(c=>c.id===left.id).duration=left.duration
-      project.clips.push(...plan.right);selectedId.value=plan.right[0].id
+      project.clips.push(...plan.right);selectCanvas(plan.right.map(c=>c.id),plan.right[0].id)
     }
     else if(action.type==='paste'){
       const plan=planClipPaste(project.clips,action.clipboard,time.value,project.duration,project.fps)
       if(plan.error){message.value=plan.error;return}
       for(const c of project.clips)c.track=plan.tracks.find(t=>t.track===c.track).to
-      project.clips.push(...plan.clips);selectedId.value=plan.clips[0].id
+      project.clips.push(...plan.clips);selectCanvas(plan.clips.map(c=>c.id),plan.clips[0].id)
     }
   }
   function editClip(id,patch) {
@@ -227,6 +235,10 @@ export function useSceneEditor() {
     else selected.value.transform[key]=v
   }
   function resetPlacement(){if(selected.value && clipVisible(selected.value,time.value))resetCanvasPlacement(selected.value,selectedFrame())}
+  function selectCanvas(ids,primary){sceneTimeline.value?.clearDetails();selectTimeline(ids);selectedId.value=canvasSelection.value.includes(primary) ? primary : canvasSelection.value.at(-1) || ''}
+  function selectTimeline(ids){canvasSelection.value=[...new Set(ids)].filter(id=>project.clips.some(c=>c.id===id));if(canvasSelection.value.length && !canvasSelection.value.includes(selectedId.value))selectedId.value=canvasSelection.value.at(-1)}
+  function batchCanvasTransform(entries){applyCanvasSelection(project.clips,entries,time.value,project.fps,autoTransform.value)}
+  watch(()=>project.clips.map(c=>c.id),()=>{canvasSelection.value=canvasSelection.value.filter(id=>project.clips.some(c=>c.id===id))})
   function moveModel(id,position) {selectedId.value=id;editTransform('x',position.x);editTransform('y',position.y)}
   function transformModel(id,patch){selectedId.value=id;for(const [key,value] of Object.entries(patch))editTransform(key,value)}
   function editParam(p,value) {
@@ -262,8 +274,8 @@ export function useSceneEditor() {
     const n=Number(value);if(!field || !Number.isFinite(n))return
     setClipKeyframe(selected.value,key,selectedFrame(),Math.max(field.min,Math.min(field.max,n)))
   }
-  function editEvent(id,patch) {const clip=selected.value,event=clip?.events.find(e=>e.id===id);if(!event)return;const plan=planEventEdit(clip,event,patch,project.fps);if(plan.error){message.value=plan.error;return}if(event.type==='expression')clip.events=clip.events.filter(e=>e===event || e.type!=='expression' || e.frame!==plan.patch.frame);Object.assign(event,plan.patch);clip.events.sort((a,b)=>a.frame-b.frame)}
-  function pasteEvent(data) {const clip=selected.value;if(!clip || !runtime.value)return;const names=data.type==='motion' ? runtime.value.motions : runtime.value.expressions;if(!names.includes(data.name)){message.value='当前模型没有该动作或表情';return}const event={...data,id:uid('event')};const plan=planEventEdit(clip,event,{start:time.value},project.fps);if(plan.error){message.value=plan.error;return}if(event.type==='expression')clip.events=clip.events.filter(e=>e.type!=='expression' || e.frame!==plan.patch.frame);clip.events.push({...event,...plan.patch});clip.events.sort((a,b)=>a.frame-b.frame)}
+  function editEvent(id,patch) {const clip=selected.value,event=clip?.events.find(e=>e.id===id);if(!event)return;const plan=planEventEdit(clip,event,patch,project.fps);if(plan.error){message.value=plan.error;return}if(event.type==='expression')clip.events=clip.events.filter(e=>e===event || e.type!=='expression' || e.frame!==plan.patch.frame);if(event.type==='motion'){for(const paired of clip.events.filter(e=>linkedExpressionMotion(clip,e)===event))paired.frame=plan.patch.frame}else if(event.type==='expression')event.motionLinked=false;Object.assign(event,plan.patch);clip.events.sort((a,b)=>a.frame-b.frame)}
+  function pasteEvent(data) {const clip=selected.value;if(!clip || !runtime.value)return;const names=data.type==='motion' ? runtime.value.motions : runtime.value.expressions;if(!names.includes(data.name)){message.value='当前模型没有该动作或表情';return}const event={...data,id:uid('event'),...(data.type==='expression' ? {motionLinked:false} : {})};const plan=planEventEdit(clip,event,{start:time.value},project.fps);if(plan.error){message.value=plan.error;return}if(event.type==='expression')clip.events=clip.events.filter(e=>e.type!=='expression' || e.frame!==plan.patch.frame);clip.events.push({...event,...plan.patch});clip.events.sort((a,b)=>a.frame-b.frame)}
   function removeEvent(event) {const clip=selected.value;if(clip)clip.events=clip.events.filter(e=>e.id!==event.id)}
   function duplicate() {
     if(!selected.value || locked.value)return
@@ -277,7 +289,7 @@ export function useSceneEditor() {
     if(!canSplit.value || locked.value || project.clips.length>=16)return
     const clip=selected.value,right=splitClip(snapshot(clip),time.value)
     if(!right)return
-    clip.duration=time.value-clip.start;project.clips.push(right);selectedId.value=right.id
+    clip.duration=time.value-clip.start;project.clips.push(right);selectCanvas([right.id],right.id)
   }
   function deleteSelected() {if(editLocked.value)return;const i=project.clips.findIndex(c=>c.id===selectedId.value);if(i>=0)project.clips.splice(i,1);selectedId.value=''}
   function runtimeReady(id,data) {
@@ -303,7 +315,7 @@ export function useSceneEditor() {
     const at=selectedFrame(),clip=selected.value
     const seconds=type==='motion' ? runtime.value.info[name]?.seconds : 0
     if(type==='motion' && !seconds){message.value='动作时长尚未读取，请等待后再添加';return}
-    const eventData={id:uid('event'),type,name,frame:at,duration:seconds ? Math.round(seconds*project.fps)/project.fps : 0,sourceDuration:seconds,offset:0}
+    const eventData={id:uid('event'),type,name,frame:at,duration:seconds ? Math.round(seconds*project.fps)/project.fps : 0,sourceDuration:seconds,offset:0,...(type==='expression' ? {motionLinked:false} : {})}
     if(type==='motion'){const plan=planEventEdit(clip,eventData,{start:time.value},project.fps);if(plan.error){message.value=plan.error;return}Object.assign(eventData,plan.patch)}
     else clip.events=clip.events.filter(e=>!(e.type===type && e.frame===at))
     clip.events.push(eventData)
@@ -312,7 +324,7 @@ export function useSceneEditor() {
       const target=name.replace(/^mtn_/i,'').replace(/_[clr]$/i,'')
       if(!runtime.value.info[name]?.carriesExpression) {
         const paired=runtime.value.expressions.find(e=>e.replace(/^exp_/i,'').replace(/\.exp3?$/i,'')===target)
-        if(paired){clip.events=clip.events.filter(e=>!(e.type==='expression' && e.frame===at));clip.events.push({id:uid('event'),type:'expression',name:paired,frame:at,duration:0,offset:0})}
+        if(paired){clip.events=clip.events.filter(e=>!(e.type==='expression' && e.frame===at));clip.events.push({id:uid('event'),type:'expression',name:paired,frame:at,duration:0,offset:0,motionLinked:true})}
       }
     }
     clip.events.sort((a,b)=>a.frame-b.frame);drive()
@@ -327,12 +339,15 @@ export function useSceneEditor() {
         const expr=activeEvent(clip,'expression',time.value,project.fps)
         const name=expr?.name || r.expressions.find(e=>/^(default|idle|exp_idle01\.exp3)$/i.test(e)) || ''
         if(name && name!==r.expression){r.sdk.setExpression(name);r.expression=name}
-        if(playing.value) {
+        {
           const motion=activeEvent(clip,'motion',time.value,project.fps)
-          if(motion && (r.timelineMotion!==motion || !r.wasVisible)){playTimelineMotion(r.sdk,motion.name,(motion.offset || 0)+state.frame/project.fps-motion.frame/project.fps);r.timelineMotion=motion}
+          if(playing.value && motion && (r.timelineMotion!==motion || !r.wasVisible)){playTimelineMotion(r.sdk,motion.name,(motion.offset || 0)+state.frame/project.fps-motion.frame/project.fps);r.timelineMotion=motion}
           else if(!motion && r.timelineMotion){resetModelPose(r.sdk);r.timelineMotion=null;r.expression='';if(name){r.sdk.setExpression(name);r.expression=name}}
         }
-        r.sdk.setParams({...state.params,...mouse})
+        const activeMotion=activeEvent(clip,'motion',time.value,project.fps)
+        const motionInfo=activeMotion && (playing.value || r.timelineMotion===activeMotion) ? r.info[activeMotion.name] : null
+        const owned=[...(motionInfo?.parameterIds || []),...motionEffectParameterIds(r.sdk,motionInfo?.effects),...expressionParameterIds(r.sdk,expr?.name)]
+        r.sdk.setParams(sceneParameterOverrides(state.params,mouse,owned,r.groups))
         if(!playing.value)renderModelNow(r.sdk)
       } else if(r.wasVisible)r.sdk.setParams({})
       r.lastFrame=state.frame;r.wasVisible=visible
@@ -378,12 +393,12 @@ export function useSceneEditor() {
   }
   function exportProject() {
     const url=URL.createObjectURL(new Blob([JSON.stringify(project,null,2)],{type:'application/json'}))
-    const a=document.createElement('a');a.href=url;a.download='tomori-v2-'+Date.now()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)
+    const a=document.createElement('a');a.href=url;a.download='tomori-v0.1-'+Date.now()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)
   }
-  function replaceProject(data) {const parsed=readProject(data,models,selected.value?.model);backgroundRequest++;uploadingBackground.value=false;pause();clearPreviewOverrides();Object.assign(project,parsed);selectedId.value=project.clips[0]?.id || '';frame.value=0}
+  function replaceProject(data) {const parsed=readProject(data,models);backgroundRequest++;uploadingBackground.value=false;pause();clearPreviewOverrides();Object.assign(project,parsed);selectCanvas(project.clips[0] ? [project.clips[0].id] : [],project.clips[0]?.id);frame.value=0}
   async function importProject(event) {
     const file=event.target.files?.[0];event.target.value='';if(!file || locked.value)return
-    try{const data=JSON.parse(await file.text());if(locked.value)return;history.end();history.edit(()=>replaceProject(data));message.value=data.version===3 ? '已导入 v2 工程' : '已将 v1 工程转换为模型片段'}catch(e){message.value='导入失败：'+e.message}
+    try{const data=JSON.parse(await file.text());if(locked.value)return;history.end();history.edit(()=>replaceProject(data));message.value='已导入场景工程'}catch(e){message.value='导入失败：'+e.message}
   }
   let saveTimer=null,initialized=false
   watch(project,()=>{drive();if(!initialized)return;clearTimeout(saveTimer);saveTimer=setTimeout(()=>{try{localStorage.setItem('tomori-scene-v2',JSON.stringify(project))}catch{message.value='本地保存失败，请导出工程备份'}},400)},{deep:true})
@@ -393,13 +408,10 @@ export function useSceneEditor() {
     try{
       const saved=localStorage.getItem('tomori-scene-v2')
       if(saved)replaceProject(JSON.parse(saved))
-      else {
-        const state=JSON.parse(localStorage.getItem('tomori-viewer-state') || 'null'),kf=JSON.parse(localStorage.getItem('tomori-kf-state') || 'null')
-        if(state?.model && kf){Object.assign(project,readProject(kf,models,state.model));selectedId.value=project.clips[0]?.id || '';message.value='已复制 v1 工程到 v2；原 v1 工程仍保留'}
-      }
+
     }catch(e){message.value='恢复工程失败：'+e.message}
     initialized=true
   })
   onBeforeUnmount(()=>{window.removeEventListener('keydown',shortcut);pause();clearInterval(previewTimer);clearTimeout(saveTimer);try{localStorage.setItem('tomori-scene-v2',JSON.stringify(project))}catch{};recorder.destroy()})
-  return {batchClips:editable(batchClips),editLocked,changeLayerState:editable(changeLayerState),project,runtimes,selectedId,playing,loopPlayback,message,assetSearch,paramSearch,allParams,autoTransform,sceneCanvas,projectInput,recorder,locked,time,selected,runtime,loading,canSplit,selectedPose,paramLabels,filteredModels,visibleParams,transformFields,hasKey,previewMotionName,previewExpressionName,activePreview,previewMotionInfo,previewProgress,preview,resetPreview,endPreview,mouseMoved,changeMouseTrack:editable(changeMouseTrack),addChosenEvent:editable(addChosenEvent),canUndo,canRedo,undo,redo,beginEdit,endEdit,renameClip:editable(renameClip,true),changeBackground:editable(changeBackground,true),backgroundInput,backgroundLoading,uploadingBackground,uploadBackground,removeBackgroundImage:editable(removeBackgroundImage),resetBackground:editable(resetBackground),addModel:editable(addModel),renameLayer:editable(renameLayer),reorderLayer:editable(reorderLayer),editClip:editable(editClip,true),editTiming:editable(editTiming,true),editTransform:editable(editTransform,true),resetPlacement:editable(resetPlacement),moveModel:editable(moveModel),transformModel:editable(transformModel),editParam:editable(editParam,true),resetParam:editable(resetParam),toggleKey:editable(toggleKey),removeKey:editable(removeKey),moveKey:editable(moveKey),batchKeys:editable(batchKeys),editKeyValue:editable(editKeyValue,true),editEvent:editable(editEvent),pasteEvent:editable(pasteEvent),removeEvent:editable(removeEvent),duplicate:editable(duplicate),split:editable(split),deleteSelected:editable(deleteSelected),runtimeReady,disposeRuntime,runtimeError,addEvent:editable(addEvent),play,pause,seek,stop,changeDuration:editable(changeDuration,true),changeFps:editable(changeFps),record,exportProject,importProject}
+  return {sceneTimeline,selectTimeline,changeAspectRatio:editable(changeAspectRatio),canvasSelection,selectCanvas,batchCanvasTransform:editable(batchCanvasTransform),batchClips:editable(batchClips),editLocked,changeLayerState:editable(changeLayerState),project,runtimes,selectedId,playing,loopPlayback,message,paramSearch,allParams,autoTransform,sceneCanvas,projectInput,recorder,locked,time,selected,runtime,loading,canSplit,selectedPose,paramLabels,assetModels:models,visibleParams,transformFields,hasKey,previewMotionName,previewExpressionName,activePreview,previewMotionInfo,previewProgress,preview,resetPreview,endPreview,mouseMoved,changeMouseTrack:editable(changeMouseTrack),addChosenEvent:editable(addChosenEvent),canUndo,canRedo,undo,redo,beginEdit,endEdit,renameClip:editable(renameClip,true),changeBackground:editable(changeBackground,true),backgroundInput,backgroundLoading,uploadingBackground,uploadBackground,removeBackgroundImage:editable(removeBackgroundImage),resetBackground:editable(resetBackground),addModel:editable(addModel),renameLayer:editable(renameLayer),reorderLayer:editable(reorderLayer),editClip:editable(editClip,true),editTiming:editable(editTiming,true),editTransform:editable(editTransform,true),resetPlacement:editable(resetPlacement),moveModel:editable(moveModel),transformModel:editable(transformModel),editParam:editable(editParam,true),resetParam:editable(resetParam),toggleKey:editable(toggleKey),removeKey:editable(removeKey),moveKey:editable(moveKey),batchKeys:editable(batchKeys),editKeyValue:editable(editKeyValue,true),editEvent:editable(editEvent),pasteEvent:editable(pasteEvent),removeEvent:editable(removeEvent),duplicate:editable(duplicate),split:editable(split),deleteSelected:editable(deleteSelected),runtimeReady,disposeRuntime,runtimeError,addEvent:editable(addEvent),play,pause,seek,stop,changeDuration:editable(changeDuration,true),changeFps:editable(changeFps),record,exportProject,importProject}
 }

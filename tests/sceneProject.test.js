@@ -120,11 +120,8 @@ test('v2 工程往返保留片段、源偏移、关键帧、表情和动作',()=
   assert.deepEqual(data,expected)
   assert.notEqual(id,oldId)
 })
-test('v1 工程迁移成整段模型，缺失素材或未知格式明确报错',()=>{
-  const p=readProject({version:2,model:'anon/b',fps:30,duration:3,keyframes:{PARAM_MOUTH_OPEN_Y:[{frame:0,value:.7}]},events:[]},models)
-  assert.equal(p.clips[0].model,'anon/b')
-  assert.equal(p.clips[0].duration,3)
-  assert.equal(p.clips[0].keyframes.PARAM_MOUTH_OPEN_Y[0].value,.7)
+test('移除单模型工程迁移，缺失素材或未知格式明确报错',()=>{
+  assert.throws(()=>readProject({version:2,model:'anon/b',keyframes:{}},models),/版本/)
   assert.throws(()=>readProject({version:3,clips:[{model:'missing/model'}]},models),/不存在/)
   assert.throws(()=>readProject({},models),/版本/)
 })

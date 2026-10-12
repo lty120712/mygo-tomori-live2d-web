@@ -1,3 +1,4 @@
+import {normalizeEasing} from './keyframeEasing.js'
 export function visibleClipKeys(clip, fps) {
   return Object.entries(clip.keyframes).flatMap(([key, keys]) => keys.map(k => ({ ...k, key, time: clip.start + k.frame / fps - clip.offset })))
     .filter(k => k.time >= clip.start - 1e-8 && k.time < clip.start + clip.duration - 1e-8)
@@ -55,8 +56,8 @@ export function editKeyRefs(clips, items, action, fps) {
       if (!clip) continue
       const keys = clip.keyframes[entry.key] ||= []
       const existing = keys.find(k => k.frame === entry.frame)
-      if (existing) Object.assign(existing, { value: entry.value, easing: entry.easing })
-      else keys.push({ frame: entry.frame, value: entry.value, easing: entry.easing })
+      if (existing) Object.assign(existing, { value: entry.value, easing: normalizeEasing(entry.easing) })
+      else keys.push({ frame: entry.frame, value: entry.value, easing: normalizeEasing(entry.easing) })
       keys.sort((a, b) => a.frame - b.frame)
     }
     return
@@ -70,7 +71,7 @@ export function editKeyRefs(clips, items, action, fps) {
       clip.keyframes[item.key]=keys.filter(k=>k!==key)
       if(!clip.keyframes[item.key].length)delete clip.keyframes[item.key]
     } else {
-      if(['linear','easeIn','easeOut','easeInOut'].includes(action.easing))key.easing=action.easing
+      if(action.easing!==undefined)key.easing=normalizeEasing(action.easing)
       if(Number.isFinite(action.value))key.value=action.value
       if(Number.isFinite(action.time))moveClipKey(clip,item.key,item.frame,(action.time-clip.start+clip.offset)*fps,fps)
     }

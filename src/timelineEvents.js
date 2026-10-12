@@ -1,9 +1,15 @@
 // Event times are stored in source-model frames, like parameter keyframes.
+const expressionStem=name=>name.replace(/^(mtn_|exp_)/i,'').replace(/_[clr]$/i,'').replace(/\.exp3?$/i,'')
+export function linkedExpressionMotion(clip,event){
+  if(event.type!=='expression' || event.motionLinked===false)return null
+  return clip.events.find(m=>m.type==='motion' && m.frame===event.frame && expressionStem(m.name)===expressionStem(event.name)) || null
+}
 export function eventRange(clip,event,fps) {
   const start=clip.start+event.frame/fps-clip.offset
-  const next=event.type==='expression' ? clip.events.filter(e=>e.type===event.type && e.frame>event.frame).sort((a,b)=>a.frame-b.frame)[0] : null
+  const linked=linkedExpressionMotion(clip,event)
+  const next=event.type==='expression' ? clip.events.filter(e=>e.type===event.type && e.frame>event.frame && (linked || !linkedExpressionMotion(clip,e))).sort((a,b)=>a.frame-b.frame)[0] : null
   const limit=next ? clip.start+next.frame/fps-clip.offset : clip.start+clip.duration
-  const end=Math.min(clip.start+clip.duration,limit,event.type==='motion' && event.duration>0 ? start+event.duration : limit)
+  const end=Math.min(clip.start+clip.duration,limit,linked ? start+linked.duration : event.motionLinked===true ? start : event.type==='motion' && event.duration>0 ? start+event.duration : limit)
   return {start:Math.max(clip.start,start),end,sourceStart:start,duration:Math.max(0,end-Math.max(clip.start,start))}
 }
 export function eventProgress(clip,event,time,fps) {

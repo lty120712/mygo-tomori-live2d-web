@@ -1,10 +1,11 @@
 import { uniqueKeyRefs } from './timelineKeyframes.js'
 import { resolveParamId } from './params.js'
+import {normalizeEasing} from './keyframeEasing.js'
 
 export function copyKeyRefs(clips, items, fps) {
   const keys = uniqueKeyRefs(items).flatMap(item => {
     const clip = clips.find(c => c.id === item.clipId), key = clip?.keyframes[item.key]?.find(k => k.frame === item.frame)
-    return key ? [{ clipId: clip.id, key: item.key, value: key.value, easing: key.easing || 'linear', time: clip.start + key.frame / fps - clip.offset }] : []
+    return key ? [{ clipId: clip.id, key: item.key, value: key.value, easing: normalizeEasing(key.easing), time: clip.start + key.frame / fps - clip.offset }] : []
   }).sort((a, b) => a.time - b.time)
   if (!keys.length) return null
   const origin = keys[0].time
@@ -30,7 +31,7 @@ export function planKeyPaste(clips, clipboard, selectedId, time, fps, groups = {
     const frame = Math.round((time + copied.delay - clip.start + clip.offset) * fps)
     const low = Math.ceil(clip.offset * fps - 1e-8), high = Math.ceil((clip.offset + clip.duration) * fps - 1e-8) - 1
     if (frame < low || frame > high) return error('播放头位置或关键帧跨度超出片段，请调整播放头后粘贴')
-    entries.push({ clipId: clip.id, key, frame, value: copied.value, easing: copied.easing })
+    entries.push({ clipId: clip.id, key, frame, value: copied.value, easing: normalizeEasing(copied.easing) })
   }
   // Downsampling can place copied keys on the same frame; the later value wins.
   return { entries: [...new Map(entries.map(e => [JSON.stringify([e.clipId, e.key, e.frame]), e])).values()], error: '' }

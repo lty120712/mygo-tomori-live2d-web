@@ -1,14 +1,16 @@
 import { normalizeMotionEvents } from './timelineEvents.js'
+import { applyKeyEasing,normalizeEasing } from './keyframeEasing.js'
 import { normalizeParamValues } from './params.js'
 
 export const SCENE_VERSION = 3
 export const SCENE_WIDTH = 960
 export const SCENE_HEIGHT = 540
+export function sceneSize(aspectRatio){return aspectRatio==='9:16' ? {width:540,height:960} : {width:960,height:540}}
 export function uid(prefix = 'clip') {
   return prefix + '-' + crypto.randomUUID()
 }
 export function createProject() {
-  return { version: SCENE_VERSION, fps: 30, duration: 10, background: '#00b140', backgroundImage: '', backgroundImageName: '', clips: [] }
+  return { version: SCENE_VERSION, aspectRatio:'16:9', fps: 30, duration: 10, background: '#00b140', backgroundImage: '', backgroundImageName: '', clips: [] }
 }
 export function createClip(model, start = 0, duration = 5, track = 0) {
   return {
@@ -31,9 +33,7 @@ export function sampleTrack(keys, frame, fallback) {
     const a = keys[i - 1], b = keys[i]
     if (frame > b.frame) continue
     let t = (frame - a.frame) / (b.frame - a.frame)
-    if (a.easing === 'easeIn') t = t ** 3
-    else if (a.easing === 'easeOut') t = 1 - (1 - t) ** 3
-    else if (a.easing === 'easeInOut') t = t < .5 ? 4 * t ** 3 : 1 - (-2 * t + 2) ** 3 / 2
+    t = applyKeyEasing(t,a.easing)
     return a.value + (b.value - a.value) * t
   }
   return keys.at(-1).value
@@ -80,9 +80,10 @@ function number(value, fallback, min, max) {
   const n = Number(value)
   return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback
 }
-export function readProject(data, models, legacyModel) {
+export function readProject(data, models) {
   if (!data || typeof data !== 'object') throw new Error('无效工程')
   const project = createProject()
+  project.aspectRatio=data.aspectRatio==='9:16' ? '9:16' : '16:9'
   project.fps = Math.round(number(data.fps, 30, 1, 60))
   project.duration = number(data.duration, 10, .5, 600)
   if (typeof data.background === 'string' && /^#[0-9a-f]{6}$/i.test(data.background)) project.background = data.background
@@ -91,15 +92,8 @@ export function readProject(data, models, legacyModel) {
     project.backgroundImage=data.backgroundImage
     project.backgroundImageName=typeof data.backgroundImageName==='string' ? data.backgroundImageName : '背景图片'
   }
-  let source = data.clips
-  if (data.version !== SCENE_VERSION) {
-    if (data.version != null && ![1, 2].includes(data.version)) throw new Error('无法识别工程版本')
-    if (!data.keyframes || typeof data.keyframes !== 'object') throw new Error('无法识别工程版本')
-    const modelId = data.model || legacyModel
-    const model = models.find(m => m.category + '/' + m.name === modelId) || models[0]
-    if (!model) throw new Error('没有可用模型')
-    source = [{ ...createClip(model, 0, project.duration, 0), keyframes: data.keyframes, events: data.events || [] }]
-  }
+  if (data.version !== SCENE_VERSION) throw new Error('无法识别工程版本，仅支持多模型场景工程')
+  const source = data.clips
   if (!Array.isArray(source)) throw new Error('缺少模型片段')
   if (source.length > 16) throw new Error('单个工程最多 16 个模型片段')
   project.clips = source.map((raw, index) => {
@@ -123,13 +117,13 @@ export function readProject(data, models, legacyModel) {
       if (!Array.isArray(keys)) continue
       for (const k of keys) if (Number.isFinite(k.frame) && k.frame >= 0 && Number.isFinite(k.value)) {
         setClipKeyframe(clip, key, Math.round(k.frame), k.value)
-        const easing = ['linear', 'easeIn', 'easeOut', 'easeInOut'].includes(k.easing) ? k.easing : 'linear'
+        const easing = normalizeEasing(k.easing)
         clip.keyframes[key].find(v => v.frame === Math.round(k.frame)).easing = easing
       }
     }
     clip.events = (Array.isArray(raw.events) ? raw.events : []).filter(e =>
       ['motion', 'expression'].includes(e.type) && typeof e.name === 'string' && Number.isFinite(e.frame) && e.frame >= 0
-    ).map(e => ({ id:uid('event'), type:e.type, name:e.name, frame:Math.round(e.frame), duration:e.type==='expression' ? 0 : number(e.duration,0,0,600), offset:e.type==='expression' ? 0 : number(e.offset,0,0,600), sourceDuration:e.type==='expression' ? 0 : number(e.sourceDuration,e.duration || 0,0,600) }))
+    ).map(e => ({ id:uid('event'), type:e.type, name:e.name, frame:Math.round(e.frame), ...(e.type==='expression' && typeof e.motionLinked==='boolean' ? {motionLinked:e.motionLinked} : {}), duration:e.type==='expression' ? 0 : number(e.duration,0,0,600), offset:e.type==='expression' ? 0 : number(e.offset,0,0,600), sourceDuration:e.type==='expression' ? 0 : number(e.sourceDuration,e.duration || 0,0,600) }))
       .sort((a, b) => a.frame - b.frame)
     normalizeMotionEvents(clip,project.fps)
     return clip
