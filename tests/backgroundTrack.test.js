@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { BACKGROUND_CLIP_LIMIT, backgroundClipLimit, backgroundAtTime, createColorBackgroundClip, createImageBackgroundClip, planBackgroundAdd, migrateLegacyBackground, paintBackground } from '../src/mediaTracks.js'
+import { BACKGROUND_CLIP_LIMIT, backgroundClipLimit, backgroundAtTime, backgroundGaps, createColorBackgroundClip, createImageBackgroundClip, planBackgroundAdd, migrateLegacyBackground, paintBackground } from '../src/mediaTracks.js'
 import { planClipMove, applyClipStarts } from '../src/clipSelection.js'
 import { createProject } from '../src/sceneProject.js'
 
@@ -60,13 +60,30 @@ test('legacy 背景图迁入素材库后生成全长片段并清空旧字段', (
   project.backgroundImage = 'data:image/png;base64,AA'
   project.backgroundImageName = '旧背景.png'
   project.duration = 12
-  const clip = migrateLegacyBackground(project, { id: 'migrated', name: '旧背景.png' })
+  const clips = migrateLegacyBackground(project, { id: 'migrated', name: '旧背景.png' })
   assert.equal(project.backgroundImage, '')
   assert.equal(project.backgroundImageName, '')
   assert.equal(project.backgroundClips.length, 1)
-  assert.equal(clip.assetId, 'migrated')
-  assert.equal(clip.duration, 12)
-  assert.equal(clip.start, 0)
+  assert.equal(clips.length, 1)
+  assert.equal(clips[0].assetId, 'migrated')
+  assert.equal(clips[0].duration, 12)
+  assert.equal(clips[0].start, 0)
+})
+
+test('背景空档计算与迁移只填空档，不与已有或同一步新增片段重叠', () => {
+  const clips = [{ start: 1, duration: 2 }, { start: 5, duration: 2 }]
+  assert.deepEqual(backgroundGaps(clips, 10, 30), [{ start: 0, duration: 1 }, { start: 3, duration: 2 }, { start: 7, duration: 3 }])
+  assert.deepEqual(backgroundGaps([], 10, 30), [{ start: 0, duration: 10 }])
+  const project = createProject()
+  project.backgroundImage = 'data:image/png;base64,AA'
+  project.duration = 10
+  const added = createColorBackgroundClip('#00ffff', 6, 4)
+  const migrated = migrateLegacyBackground(project, { id: 'migrated', name: '旧背景.png' }, added)
+  assert.equal(migrated.length, 1)
+  assert.deepEqual({ start: migrated[0].start, duration: migrated[0].duration }, { start: 0, duration: 6 })
+  project.backgroundClips.push(added)
+  assert.equal(project.backgroundClips.filter(c => c.start < 6 && c.start + c.duration > 6).length, 0)
+  assert.equal(project.backgroundImage, '')
 })
 
 test('背景绘制：纯色填充、图片拉伸、素材缺失回退纯色', () => {

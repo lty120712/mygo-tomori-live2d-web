@@ -24,7 +24,22 @@
       <template v-if="selected && !isImageClip(selected)">
         <div v-for="type in ['motion','expression']" :key="type" class="sub-row event-row"><div class="track-label">{{type==='motion' ? '动作' : '表情'}} · 选中片段</div><div class="track-lane" tabindex="-1" @pointerdown.self="selectedEventId='';beginSeek($event)" @contextmenu.prevent.stop="openEventLaneMenu($event,type)"><div v-for="event in visibleEvents(type)" :key="event.id" role="button" tabindex="0" class="event-marker event-clip" :class="{chosen:selectedEventId===event.id,motion:type==='motion',expression:type==='expression'}" :style="eventStyle(event)" :aria-label="eventTitle(event)" :title="eventTitle(event)+' · 拖动移动；右键编辑'" @pointerdown.stop="beginEvent($event,event,'move')" @click.stop="selectEvent(event)" @keydown.enter.prevent.stop="selectEvent(event)" @contextmenu.prevent.stop="openEventMenu($event,event)"><span v-if="type==='motion'" class="trim-handle left" title="裁剪动作入点" @pointerdown.stop="beginEvent($event,event,'left')"></span><span v-if="type==='expression'" class="expression-diamond">◆</span><span class="event-name">{{event.name}}</span><small v-if="type==='motion'">剩余 {{formatTimecode(eventProgress(selected,event,time,fps).remaining,fps)}}</small><span v-if="type==='motion'" class="event-progress" role="progressbar" :aria-label="event.name+'播放进度'" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="Math.round(eventProgress(selected,event,time,fps).ratio*100)"><i :style="{width:eventProgress(selected,event,time,fps).ratio*100+'%'}"></i></span><span v-if="type==='motion'" class="trim-handle right" title="裁剪动作出点" @pointerdown.stop="beginEvent($event,event,'right')"></span></div><b v-if="snapTime!==null" class="snap-guide" :style="{left:snapTime/duration*100+'%'}"></b><b class="playhead" :style="{left:time/duration*100+'%'}"></b></div></div>
       </template>
-      <div v-if="!clips.length" class="timeline-empty">添加模型或图片后，每个片段都会拥有独立轨道</div>
+      <div class="track-row background-track">
+        <div class="track-label track-card" title="背景始终位于最底层，按时间切换纯色或图片">
+          <span class="layer-name">背景<small v-if="!backgroundClips.length"> · 兜底</small></span>
+          <button :disabled="disabled" title="在播放头添加纯色背景片段" @click="addColorBackground">＋纯色</button>
+          <input class="background-color-input" type="color" aria-label="新背景片段颜色" :value="backgroundDraftColor" :disabled="disabled" @input="backgroundDraftColor=$event.target.value" />
+        </div>
+        <div class="track-lane background-lane" tabindex="-1" @pointerdown.self="beginSeek($event)" @contextmenu.prevent.stop="openBackgroundMenu($event,null)">
+          <div v-for="clip in backgroundClips" :key="clip.id" class="model-clip background-clip" tabindex="0" :class="{selected:backgroundSelection===clip.id,multiselected:backgroundSelection===clip.id,image:clip.kind==='image'}" :aria-label="'背景片段 '+backgroundLabel(clip)" :title="backgroundTitle(clip)+' · 拖动移动；左右拖动两端裁剪；右键编辑'" :style="{left:clip.start/duration*100+'%',width:clip.duration/duration*100+'%',background:clip.kind==='color' ? clip.color : undefined}" @pointerdown="beginBackground($event,clip,'move')" @pointermove="moveBackground" @pointerup="endBackground" @pointercancel="endBackground" @lostpointercapture="endBackground" @contextmenu.prevent.stop="openBackgroundMenu($event,clip)">
+            <span class="trim-handle left" title="调整背景入点" @pointerdown.stop="beginBackground($event,clip,'left')"></span>
+            <span class="clip-name">{{backgroundLabel(clip)}}</span><small>{{formatTimecode(clip.duration,fps)}}</small>
+            <span class="trim-handle right" title="调整背景出点" @pointerdown.stop="beginBackground($event,clip,'right')"></span>
+          </div>
+          <b v-if="snapTime!==null" class="snap-guide" :style="{left:snapTime/duration*100+'%'}"></b><b class="playhead" :style="{left:time/duration*100+'%'}"></b>
+        </div>
+      </div>
+      <div v-if="!clips.length && !backgroundClips.length" class="timeline-empty">添加模型或图片后，每个片段都会拥有独立轨道</div>
     </div></div></div>
     <Teleport to="body"><div v-if="boxRect" class="key-marquee" :style="boxRect"></div><div v-if="menu" class="timeline-menu" role="menu" :aria-label="menu.title" :style="{left:menu.x+'px',top:menu.y+'px'}" @keydown.esc.prevent.stop="closeMenu" @keydown="selectionShortcut" @contextmenu.prevent>
       <strong :title="menu.title">{{menu.title}}</strong><small v-if="menuLocked" class="menu-status">图层已锁定，解锁后可编辑</small>
@@ -71,6 +86,16 @@
       </template>
       <template v-else-if="menu.kind==='event-lane'"><small>{{menu.eventType==='motion' ? '动作使用独立时段，不可重叠' : '表情从切换帧保持到下一表情帧'}}</small><button role="menuitem" :disabled="editDisabled || !eventClipboard || eventClipboard.type!==menu.eventType" @click="pasteCopiedEvent">粘贴{{menu.eventType==='motion' ? '动作' : '表情'}}到播放头<kbd>Ctrl+V</kbd></button></template>
       <template v-else-if="menu.kind==='property'"><span class="menu-section">该参数 · {{menu.items.length}} 帧</span><button role="menuitem" :disabled="disabled || !menu.items.length" @click="selectMenuKeys">全选该参数关键帧</button><button role="menuitem" :disabled="editDisabled || !keyClipboard" @click="pasteSelection">粘贴关键帧到播放头<kbd>Ctrl+V</kbd></button><button role="menuitem" class="menu-delete" :disabled="menuLocked || !menu.items.length" @click="deleteMenuKeys">删除该参数全部关键帧</button></template>
+      <template v-if="menu.kind==='background'">
+        <template v-if="menu.background">
+          <span class="menu-section">背景片段 · {{backgroundLabel(menu.background)}}</span>
+          <label v-if="menu.background.kind==='color'">颜色<input type="color" aria-label="背景片段颜色" :value="backgroundMenuColor" @input="applyBackgroundColor" @focus="emit('begin-edit')" @blur="emit('end-edit')" /></label>
+          <button role="menuitem" :disabled="disabled" @click="emit('background-edit',menu.background.id,{start:props.time});closeMenu()">移动到播放头</button>
+          <button role="menuitem" :disabled="disabled" @click="emit('background-edit',menu.background.id,{duration:props.duration-menu.background.start});closeMenu()">延伸到工程结尾</button>
+          <button role="menuitem" class="menu-delete" :disabled="disabled" @click="emit('delete-background',menu.background.id);closeMenu()">删除背景片段</button>
+        </template>
+        <span v-else class="menu-hint">在左侧「＋纯色」添加纯色片段，或到素材库「图片」分类点「背景」添加图片片段。</span>
+      </template>
       <small class="menu-footer">修改可撤销 <kbd>Ctrl+Z</kbd> · 关闭 <kbd>Esc</kbd></small>
     </div></Teleport>
     <Teleport to="body"><KeyframeCurveEditor v-if="curveEdit" :value="curveEdit.easing" :description="curveEdit.description" :disabled="disabled || !curveEdit.refs.length || refsLocked(curveEdit.refs)" @apply="applyCurve" @cancel="closeCurve" /></Teleport>
@@ -90,8 +115,8 @@ import TimecodeInput from './TimecodeInput.vue'
 import { formatTimecode } from '../timecode.js'
 import { editTimelineClip,timelineTicks } from '../timelineEditing.js'
 import { groupedClipKeys,visibleClipKeys,uniqueKeyRefs,planKeyRefMove } from '../timelineKeyframes.js'
-const props=defineProps({clips:Array,selectedIds:Array,duration:Number,fps:Number,time:Number,selectedId:String,selected:Object,labels:Object,pose:Object,runtimes:Object,transformFields:Array,disabled:Boolean,navigationDisabled:Boolean})
-const emit=defineEmits(['selection-change','clear-selection','batch-clips','batch-keys','select','seek','layer-state','rename-layer','reorder-layer','edit-clip','remove-key','move-key','toggle-key','edit-key-value','edit-event','paste-event','remove-event','begin-edit','end-edit','delete-selected'])
+const props=defineProps({clips:Array,backgroundClips:{type:Array,default:()=>[]},selectedIds:Array,duration:Number,fps:Number,time:Number,selectedId:String,selected:Object,labels:Object,pose:Object,runtimes:Object,transformFields:Array,disabled:Boolean,navigationDisabled:Boolean})
+const emit=defineEmits(['selection-change','clear-selection','batch-clips','batch-keys','select','seek','layer-state','rename-layer','reorder-layer','edit-clip','remove-key','move-key','toggle-key','edit-key-value','edit-event','paste-event','remove-event','begin-edit','end-edit','delete-selected','add-background','background-edit','delete-background'])
 const timelineRoot=ref(null),scrollArea=ref(null),ruler=ref(null),selectedKeys=ref([]),boxMode=ref(true),boxRect=ref(null),menu=ref(null),menuValue=ref(0),menuNativeValue=ref(0),menuTime=ref(0),menuEasing=ref('linear')
 const curveEdit=ref(null)
 const menuPreset=computed({get:()=>typeof menuEasing.value==='object' ? 'custom' : menuEasing.value,set:value=>{if(value==='custom')openCurveEditor();else menuEasing.value=value}})
@@ -232,8 +257,8 @@ function visibleEvents(type){return props.selected.events.filter(e=>e.type===typ
 let scrubbing=null,drag=null
 function seekAt(clientX,rect){emit('seek',Math.max(0,Math.min(props.duration,(clientX-rect.left)/rect.width*props.duration)))}
 function beginSeek(e){if(props.disabled || e.button!==0)return;const target=e.currentTarget.closest('.track-lane') || ruler.value;scrubbing={pointerId:e.pointerId,target};target.setPointerCapture(e.pointerId);target.focus({preventScroll:true});e.preventDefault();seekAt(e.clientX,target.getBoundingClientRect())}
-function moveSeek(e){if(drag){move(e);return}if(layerDrag){moveLayerDrag(e);return}if(eventDrag){moveEvent(e);return}if(keyDrag){moveKey(e);return}if(box){updateBox(e);return}if(scrubbing?.pointerId===e.pointerId && !props.disabled)seekAt(e.clientX,scrubbing.target.getBoundingClientRect())}
-function endSeek(e){if(drag)end();if(layerDrag)endLayerDrag(e);if(eventDrag)endEvent();if(keyDrag)endKey();if(box)endBox();if(scrubbing?.pointerId===e.pointerId)scrubbing=null}
+function moveSeek(e){if(drag){move(e);return}if(backgroundDrag){moveBackground(e);return}if(layerDrag){moveLayerDrag(e);return}if(eventDrag){moveEvent(e);return}if(keyDrag){moveKey(e);return}if(box){updateBox(e);return}if(scrubbing?.pointerId===e.pointerId && !props.disabled)seekAt(e.clientX,scrubbing.target.getBoundingClientRect())}
+function endSeek(e){if(drag)end();if(backgroundDrag)endBackground();if(layerDrag)endLayerDrag(e);if(eventDrag)endEvent();if(keyDrag)endKey();if(box)endBox();if(scrubbing?.pointerId===e.pointerId)scrubbing=null}
 function begin(e,clip,mode){if(props.disabled || clip.layerLocked || e.button!==0 || e.ctrlKey || e.metaKey || e.shiftKey)return;chooseClip(clip);selectedKeys.value=[];selectedEventId.value='';e.currentTarget.closest('.model-clip').focus({preventScroll:true});emit('begin-edit');dragging.value=true;drag={original:props.clips.filter(c=>selectedClips.value.includes(c.id)).map(c=>JSON.parse(JSON.stringify(c))),id:clip.id,mode,x:e.clientX,start:clip.start,duration:clip.duration,offset:clip.offset,width:e.currentTarget.closest('.track-lane').clientWidth,scrollLeft:scrollArea.value.scrollLeft};timelineRoot.value.setPointerCapture(e.pointerId);e.preventDefault()}
 function move(e){if(!drag)return;if(drag.mode==='move'){const ids=new Set(drag.original.map(c=>c.id)),delta=(e.clientX-drag.x+scrollArea.value.scrollLeft-drag.scrollLeft)/drag.width*props.duration,targets=snapping.value && !e.altKey ? [0,props.duration,props.time,...props.clips.filter(c=>!ids.has(c.id)).flatMap(c=>[c.start,c.start+c.duration])] : [],plan=planClipMove(props.clips,drag.original,delta,{duration:props.duration,fps:props.fps,targets,tolerance:8/drag.width*props.duration});snapTime.value=plan.snapTime;emit('batch-clips',{type:'move',entries:plan.entries});return}const delta=(e.clientX-drag.x+scrollArea.value.scrollLeft-drag.scrollLeft)/drag.width*props.duration,targets=snapping.value && !e.altKey ? [0,props.duration,props.time,...props.clips.filter(c=>c.id!==drag.id).flatMap(c=>[c.start,c.start+c.duration])] : [],result=editTimelineClip(drag,delta,{duration:props.duration,fps:props.fps,targets,tolerance:8/drag.width*props.duration});snapTime.value=result.snapTime;emit('edit-clip',drag.id,result.patch)}
 function end(){if(drag)emit('end-edit');drag=null;dragging.value=false;snapTime.value=null}
@@ -255,6 +280,17 @@ let eventDrag=null
 function beginEvent(e,event,mode){if(editDisabled.value || e.button!==0)return;selectEvent(event);closeMenu();const r=eventRange(props.selected,event,props.fps);eventDrag={event:{...event,duration:r.duration,offset:(event.offset || 0)+r.start-r.sourceStart},mode,x:e.clientX,start:r.start,duration:r.duration,offset:(event.offset || 0)+r.start-r.sourceStart,scrollLeft:scrollArea.value.scrollLeft};dragging.value=true;emit('begin-edit');timelineRoot.value.setPointerCapture(e.pointerId);e.preventDefault()}
 function moveEvent(e){if(!eventDrag)return;const d=eventDrag,delta=(e.clientX-d.x+scrollArea.value.scrollLeft-d.scrollLeft)/laneWidth.value*props.duration;const targets=snapping.value && !e.altKey ? [props.time,props.selected.start,props.selected.start+props.selected.duration,...props.selected.events.filter(v=>v.id!==d.event.id).flatMap(v=>{const r=eventRange(props.selected,v,props.fps);return [r.start,r.end]})] : [];const result=editTimelineClip(d,delta,{duration:props.selected.start+props.selected.duration,fps:props.fps,targets,tolerance:8/laneWidth.value*props.duration});const patch={...result.patch};if(d.event.type==='motion')patch.duration ??= d.duration;if(d.mode==='move')patch.offset=d.offset;const plan=planEventEdit(props.selected,d.event,patch,props.fps);if(plan.error){clipboardNotice.value=plan.error;return}clipboardNotice.value='';snapTime.value=result.snapTime;emit('edit-event',d.event.id,patch)}
 function endEvent(){eventDrag=null;dragging.value=false;snapTime.value=null;emit('end-edit')}
+
+const backgroundDraftColor=ref('#00b140'),backgroundSelection=ref(''),backgroundMenuColor=ref('#00b140')
+function backgroundLabel(clip){return clip.kind==='color' ? '纯色 '+clip.color : '图片 · '+clip.name}
+function backgroundTitle(clip){return backgroundLabel(clip)+' · '+formatTimecode(clip.start,props.fps)+' → '+formatTimecode(clip.start+clip.duration,props.fps)}
+function addColorBackground(){if(props.disabled)return;emit('add-background',{kind:'color',color:backgroundDraftColor.value})}
+let backgroundDrag=null
+function beginBackground(e,clip,mode){if(props.disabled || e.button!==0 || e.ctrlKey || e.metaKey || e.shiftKey)return;closeMenu();selectedClips.value=[];selectedKeys.value=[];selectedEventId.value='';backgroundSelection.value=clip.id;emit('begin-edit');dragging.value=true;backgroundDrag={original:{...clip},mode,x:e.clientX,start:clip.start,duration:clip.duration,offset:0,width:e.currentTarget.closest('.track-lane').clientWidth,scrollLeft:scrollArea.value.scrollLeft};timelineRoot.value.setPointerCapture(e.pointerId);e.preventDefault()}
+function moveBackground(e){if(!backgroundDrag)return;const d=backgroundDrag,width=Math.max(1,d.width),delta=(e.clientX-d.x+scrollArea.value.scrollLeft-d.scrollLeft)/width*props.duration,tolerance=8/width*props.duration,targets=snapping.value && !e.altKey ? [0,props.duration,props.time,...props.backgroundClips.filter(c=>c.id!==d.original.id).flatMap(c=>[c.start,c.start+c.duration])] : [];if(d.mode==='move'){const plan=planClipMove(props.backgroundClips,[d.original],delta,{duration:props.duration,fps:props.fps,targets,tolerance});snapTime.value=plan.snapTime;if(plan.entries.length)emit('background-edit',d.original.id,{start:plan.entries[0].start});return}const result=editTimelineClip(d,delta,{duration:props.duration,fps:props.fps,targets,tolerance});snapTime.value=result.snapTime;emit('background-edit',d.original.id,{start:result.patch.start,duration:result.patch.duration})}
+function endBackground(){if(backgroundDrag){backgroundSelection.value='';emit('end-edit')}backgroundDrag=null;dragging.value=false;snapTime.value=null}
+function openBackgroundMenu(e,clip){if(props.disabled)return;backgroundMenuColor.value=clip?.color || '#00b140';backgroundSelection.value=clip?.id || '';positionMenu(e,{kind:'background',title:clip ? '背景片段 · '+backgroundLabel(clip) : '背景轨道',background:clip})}
+function applyBackgroundColor(e){backgroundMenuColor.value=e.target.value;if(menu.value?.background)emit('background-edit',menu.value.background.id,{color:backgroundMenuColor.value})}
 
 </script>
 <style scoped>
@@ -306,4 +342,9 @@ function endEvent(){eventDrag=null;dragging.value=false;snapTime.value=null;emit
 .curve-segment { position:absolute; top:4px; height:19px; box-sizing:border-box; display:flex; justify-content:center; align-items:center; border-bottom:1px dotted var(--editor-focus); pointer-events:none; padding:0 8px; }
 .curve-label { pointer-events:auto; max-width:100%; height:19px; padding:1px 5px!important; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:9px!important; border-radius:4px!important; background:var(--editor-accent-soft)!important; color:var(--editor-accent)!important; opacity:.8; }
 .curve-label:hover { opacity:1; }.key-property-row .key-marker { z-index:2; }
+.background-track .track-label { gap:6px; }.background-track .layer-name { font-weight:500; color:var(--editor-accent); }
+.background-color-input { width:26px; height:22px; padding:0; flex:none; }
+.background-clip { background-image:repeating-linear-gradient(45deg,#00000014 0 6px,transparent 6px 12px); }
+.background-clip .clip-name { text-shadow:0 1px 2px #ffffffaa; }
+.timeline-menu .menu-hint { color:var(--editor-muted); font-size:11px; padding:4px 2px; line-height:1.5; }
 </style>

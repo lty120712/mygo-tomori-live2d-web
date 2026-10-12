@@ -1,4 +1,5 @@
-import { visualClips, createImageClip, appendVisualClips, visualClipLimit, backgroundAtTime } from '../mediaTracks.js'
+import { visualClips, createImageClip, appendVisualClips, visualClipLimit, backgroundAtTime, backgroundClipLimit, createColorBackgroundClip, createImageBackgroundClip, planBackgroundAdd, migrateLegacyBackground } from '../mediaTracks.js'
+import { assetStore } from '../assetStore.js'
 import {sampleTimelinePose} from '../timelinePose.js'
 import {applyCanvasSelection} from '../canvasSelection.js'
 import {sceneParameterOverrides} from '../sceneParameterPriority.js'
@@ -202,6 +203,51 @@ export function useSceneEditor() {
     project.imageClips.push(clip);selectCanvas([clip.id],clip.id)
   }
   function imageStatus(status){imageLoading.value=status.loading;missingImages.value=status.missing;missingBackgrounds.value=status.backgrounds || []}
+  const backgroundStart=()=>Math.min(time.value,Math.max(0,project.duration-1/project.fps))
+  const backgroundLength=start=>Math.min(5,Math.max(1/project.fps,project.duration-start))
+  // legacy base64 背景图只在这里准备素材，工程改动留给 history.edit，保证迁移与本次编辑同一步撤销。
+  async function prepareLegacyBackground(){
+    if(!project.backgroundImage)return null
+    const blob=await (await fetch(project.backgroundImage)).blob()
+    return assetStore.importFile(new File([blob],project.backgroundImageName || '旧背景.png',{type:blob.type || 'image/png'}))
+  }
+  async function withBackgroundEdit(mutate){
+    if(locked.value)return
+    let asset=null
+    try{asset=await prepareLegacyBackground()}catch(error){message.value='背景图片迁移失败：'+error.message}
+    if(locked.value)return
+    history.end()
+    history.edit(()=>mutate(asset))
+  }
+  function placeBackgroundClip(clip,legacyAsset){
+    const limit=backgroundClipLimit(project.backgroundClips)
+    if(limit){message.value=limit;return}
+    const plan=planBackgroundAdd(project.backgroundClips,clip,{duration:project.duration,fps:project.fps})
+    if(plan.error){message.value=plan.error;return}
+    // 迁移出来的旧背景图只填补空档，因此第一次添加不会撞上自己。
+    if(legacyAsset)migrateLegacyBackground(project,legacyAsset,plan.clip)
+    project.backgroundClips.push(plan.clip)
+    message.value=plan.clip.kind==='color' ? '已在播放头添加纯色背景片段' : '已在播放头添加背景图片片段：'+plan.clip.name
+  }
+  const addBackgroundColor=color=>withBackgroundEdit(legacy=>placeBackgroundClip(createColorBackgroundClip(color,backgroundStart(),backgroundLength(backgroundStart())),legacy))
+  const addBackgroundImage=asset=>withBackgroundEdit(legacy=>placeBackgroundClip(createImageBackgroundClip(asset,backgroundStart(),backgroundLength(backgroundStart())),legacy))
+  function editBackground(id,patch){
+    const clip=project.backgroundClips.find(c=>c.id===id);if(!clip)return
+    if(patch.color!==undefined){if(clip.kind==='color' && /^#[0-9a-f]{6}$/i.test(patch.color))clip.color=patch.color;return}
+    const min=1/project.fps,round=value=>Math.round(value*project.fps)/project.fps
+    const start=round(Math.max(0,Math.min(project.duration-min,patch.start ?? clip.start)))
+    const length=round(Math.max(min,Math.min(project.duration-start,patch.duration ?? clip.duration)))
+    if(start+length>project.duration+1e-8){message.value='背景片段不能超出工程时长';return}
+    if(project.backgroundClips.some(c=>c.id!==id && start<c.start+c.duration-1e-8 && start+length>c.start+1e-8)){message.value='背景片段不能重叠；请先调整相邻片段';return}
+    clip.start=start;clip.duration=length
+  }
+  // 取色器连续触发 input，交给 history 的手势合并成一步撤销（菜单里用 begin-edit / end-edit 包住）。
+  const editBackgroundAction=(id,patch)=>{
+    if(locked.value)return
+    if(patch.color!==undefined){history.edit(()=>editBackground(id,patch));return}
+    return withBackgroundEdit(()=>editBackground(id,patch))
+  }
+  const deleteBackgroundAction=id=>withBackgroundEdit(()=>{project.backgroundClips=project.backgroundClips.filter(c=>c.id!==id)})
   function renameLayer(track,value){const name=String(value).trim().slice(0,100);if(!name)return;for(const clip of allClips.value.filter(c=>c.track===track))clip.layerName=name}
   function changeLayerState(track,patch){setLayerState(allClips.value,track,patch);drive()}
   function reorderLayer(from,to){reorderSceneLayer(allClips.value,from,to)}
@@ -430,5 +476,5 @@ export function useSceneEditor() {
     initialized=true
   })
   onBeforeUnmount(()=>{window.removeEventListener('keydown',shortcut);window.removeEventListener('pagehide',saveProject);pause();clearInterval(previewTimer);saveProject();recorder.destroy()})
-  return {allClips,imageStatus,missingImages,missingBackgrounds,addImage:editable(addImage),sceneTimeline,selectTimeline,changeAspectRatio:editable(changeAspectRatio),canvasSelection,selectCanvas,batchCanvasTransform:editable(batchCanvasTransform),batchClips:editable(batchClips),editLocked,changeLayerState:editable(changeLayerState),project,runtimes,selectedId,playing,loopPlayback,message,paramSearch,allParams,autoTransform,sceneCanvas,projectInput,recorder,locked,time,selected,runtime,loading,canSplit,selectedPose,paramLabels,assetModels:models,visibleParams,transformFields,hasKey,previewMotionName,previewExpressionName,activePreview,previewMotionInfo,previewProgress,preview,resetPreview,endPreview,mouseMoved,changeMouseTrack:editable(changeMouseTrack),addChosenEvent:editable(addChosenEvent),canUndo,canRedo,undo,redo,beginEdit,endEdit,renameClip:editable(renameClip,true),changeBackground:editable(changeBackground,true),backgroundInput,backgroundLoading,uploadingBackground,uploadBackground,removeBackgroundImage:editable(removeBackgroundImage),resetBackground:editable(resetBackground),addModel:editable(addModel),renameLayer:editable(renameLayer),reorderLayer:editable(reorderLayer),editClip:editable(editClip,true),editTiming:editable(editTiming,true),editTransform:editable(editTransform,true),resetPlacement:editable(resetPlacement),moveModel:editable(moveModel),transformModel:editable(transformModel),editParam:editable(editParam,true),resetParam:editable(resetParam),toggleKey:editable(toggleKey),removeKey:editable(removeKey),moveKey:editable(moveKey),batchKeys:editable(batchKeys),editKeyValue:editable(editKeyValue,true),editEvent:editable(editEvent),pasteEvent:editable(pasteEvent),removeEvent:editable(removeEvent),duplicate:editable(duplicate),split:editable(split),deleteSelected:editable(deleteSelected),runtimeReady,disposeRuntime,runtimeError,addEvent:editable(addEvent),play,pause,seek,stop,changeDuration:editable(changeDuration,true),changeFps:editable(changeFps),record,exportProject,importProject}
+  return {allClips,imageStatus,missingImages,missingBackgrounds,addImage:editable(addImage),addBackgroundColor,addBackgroundImage,editBackground:editBackgroundAction,deleteBackground:deleteBackgroundAction,sceneTimeline,selectTimeline,changeAspectRatio:editable(changeAspectRatio),canvasSelection,selectCanvas,batchCanvasTransform:editable(batchCanvasTransform),batchClips:editable(batchClips),editLocked,changeLayerState:editable(changeLayerState),project,runtimes,selectedId,playing,loopPlayback,message,paramSearch,allParams,autoTransform,sceneCanvas,projectInput,recorder,locked,time,selected,runtime,loading,canSplit,selectedPose,paramLabels,assetModels:models,visibleParams,transformFields,hasKey,previewMotionName,previewExpressionName,activePreview,previewMotionInfo,previewProgress,preview,resetPreview,endPreview,mouseMoved,changeMouseTrack:editable(changeMouseTrack),addChosenEvent:editable(addChosenEvent),canUndo,canRedo,undo,redo,beginEdit,endEdit,renameClip:editable(renameClip,true),changeBackground:editable(changeBackground,true),backgroundInput,backgroundLoading,uploadingBackground,uploadBackground,removeBackgroundImage:editable(removeBackgroundImage),resetBackground:editable(resetBackground),addModel:editable(addModel),renameLayer:editable(renameLayer),reorderLayer:editable(reorderLayer),editClip:editable(editClip,true),editTiming:editable(editTiming,true),editTransform:editable(editTransform,true),resetPlacement:editable(resetPlacement),moveModel:editable(moveModel),transformModel:editable(transformModel),editParam:editable(editParam,true),resetParam:editable(resetParam),toggleKey:editable(toggleKey),removeKey:editable(removeKey),moveKey:editable(moveKey),batchKeys:editable(batchKeys),editKeyValue:editable(editKeyValue,true),editEvent:editable(editEvent),pasteEvent:editable(pasteEvent),removeEvent:editable(removeEvent),duplicate:editable(duplicate),split:editable(split),deleteSelected:editable(deleteSelected),runtimeReady,disposeRuntime,runtimeError,addEvent:editable(addEvent),play,pause,seek,stop,changeDuration:editable(changeDuration,true),changeFps:editable(changeFps),record,exportProject,importProject}
 }

@@ -62,13 +62,31 @@ export function planBackgroundAdd(clips, clip, { duration, fps }) {
     return { error: '背景片段不能重叠；请先调整相邻片段的时长或位置' }
   return { clip: placed }
 }
-/** 把 legacy base64 背景图迁入素材库后的元数据，转成一条全长背景片段并清空旧字段。 */
-export function migrateLegacyBackground(project, asset) {
-  const clip = createImageBackgroundClip(asset, 0, project.duration)
-  project.backgroundClips = [...(project.backgroundClips || []), clip]
+/** 背景是单层轨道：列出还没有片段覆盖的时间空档，用于填入迁移出来的旧背景图。 */
+export function backgroundGaps(clips, duration, fps = 30) {
+  const frame = 1 / fps, round = value => Math.round(value * fps) / fps
+  const occupied = (clips || []).map(c => ({ start: round(Math.max(0, c.start)), end: round(Math.min(duration, c.start + c.duration)) }))
+    .filter(c => c.end > c.start + 1e-9).sort((a, b) => a.start - b.start)
+  const gaps = []
+  let at = 0
+  for (const span of occupied) {
+    if (span.start > at + 1e-9) gaps.push({ start: round(at), duration: round(span.start - at) })
+    at = Math.max(at, span.end)
+  }
+  if (duration > at + 1e-9) gaps.push({ start: round(at), duration: round(duration - at) })
+  return gaps
+}
+/**
+ * 把 legacy base64 背景图迁入素材库改写成背景片段并清空旧字段。
+ * 只填补空档，因此迁移出来的片段不会和已有（或同一步新增的）片段重叠。
+ */
+export function migrateLegacyBackground(project, asset, extra = null) {
+  const clips = backgroundGaps([...(project.backgroundClips || []), ...(extra ? [extra] : [])], project.duration, project.fps || 30)
+    .map(gap => createImageBackgroundClip(asset, gap.start, gap.duration))
+  project.backgroundClips = [...(project.backgroundClips || []), ...clips]
   project.backgroundImage = ''
   project.backgroundImageName = ''
-  return clip
+  return clips
 }
 /** 背景绘制：图片拉伸铺满；素材缺失时回退纯色，保证画面不透明。 */
 export function paintBackground(ctx, background, { width, height, bitmap, legacyImage, fallback }) {

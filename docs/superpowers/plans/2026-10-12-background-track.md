@@ -520,13 +520,19 @@ import { editTimelineClip } from '../timelineEditing.js'
       <template v-else-if="menu.kind==='background'">
         <template v-if="menu.background">
           <span class="menu-section">背景片段 · {{backgroundLabel(menu.background)}}</span>
-          <label v-if="menu.background.kind==='color'">颜色<input type="color" aria-label="背景片段颜色" v-model="backgroundMenuColor" @change="applyBackgroundColor" /></label>
+          <label v-if="menu.background.kind==='color'">颜色<input type="color" aria-label="背景片段颜色" :value="backgroundMenuColor" @input="applyBackgroundColor" @focus="emit('begin-edit')" @blur="emit('end-edit')" /></label>
           <button role="menuitem" :disabled="disabled" @click="emit('background-edit',menu.background.id,{start:props.time});closeMenu()">移动到播放头</button>
           <button role="menuitem" :disabled="disabled" @click="emit('background-edit',menu.background.id,{duration:props.duration-menu.background.start});closeMenu()">延伸到工程结尾</button>
           <button role="menuitem" class="menu-delete" :disabled="disabled" @click="emit('delete-background',menu.background.id);closeMenu()">删除背景片段</button>
         </template>
         <span v-else class="menu-hint">用左侧「＋纯色」或素材库图片分类的「背景」按钮添加片段</span>
       </template>
+```
+
+菜单里的取色器用 `@input` 而不是 `@change`（原生取色器在部分环境不派发 change），并用 `@focus` / `@blur` 包成一次手势，让连续拖动色板合并成一步撤销：
+
+```js
+function applyBackgroundColor(e){backgroundMenuColor.value=e.target.value;if(menu.value?.background)emit('background-edit',menu.value.background.id,{color:backgroundMenuColor.value})}
 ```
 
 4. 脚本追加背景编辑逻辑：
@@ -630,6 +636,16 @@ import { assetStore } from '../assetStore.js'
   const deleteBackgroundAction=(id)=>withBackgroundEdit(()=>deleteBackground(id))
 ```
 
+取色器连续触发 `input`，颜色改动直接交给 `history.edit`（手势打开时不另起一步），与拖动、裁剪等一次性改动分开：
+
+```js
+  const editBackgroundAction=(id,patch)=>{
+    if(locked.value)return
+    if(patch.color!==undefined){history.edit(()=>editBackground(id,patch));return}
+    return withBackgroundEdit(()=>editBackground(id,patch))
+  }
+```
+
 3. 返回值里加上背景操作（异步函数直接返回，模板不需要 `await`）：
 
 ```js
@@ -671,6 +687,16 @@ Expected: 构建成功。
 - 两个背景片段重叠的拖动 / 裁剪被拒绝并提示，工程数据不变。
 - 上传过背景图片的旧工程（或把 `backgroundImage` 写进工程后导入）：第一次背景编辑后 legacy 图片进入素材库并生成全长片段，旧字段清空；撤销一步回到迁移前。
 - 播放、跳帧、切割点前后背景切换正确，无控制台错误；录制文件背景与预览一致。
+
+本轮实测（浏览器自动化为只读作用域，用 DOM 可访问性树 + 截图取色代替肉眼）：
+
+- 背景行渲染两条 fixture 片段（`纯色 #00ffff` 00:00–00:03、`图片 · 缺失背景.png` 00:03–00:06），时间码与提示文案正确。
+- 在占用区间点素材库「背景」被拒绝：提示「背景片段不能重叠；请先调整相邻片段的时长或位置」，片段数量不变。
+- 播放头 7 秒点「背景」生成 `图片 · test-blue.png` 00:07–00:10；8 秒画布约 10.6 万像素为纯蓝（200×100 拉伸铺满）；该素材的删除按钮变为禁用，删除片段后恢复可用。
+- 同一步里迁移出 `图片 · legacy-magenta.png` 00:06–00:07（只补空档），旧 `backgroundImage` 字段清空；按一次撤销同时回退迁移与新增，重做复原。
+- 右键菜单「删除背景片段」生效；「移动到播放头」把片段移到 00:08–00:09，8.5 秒画布显示该图片。
+- 刷新页面后四条背景片段与顺序完整恢复（localStorage + `readProject` 往返）。
+- 未覆盖：指针拖拽 / 裁剪手柄与菜单取色器（浏览器自动化无法派发指针手势，也无法触发原生取色器 input 事件），这两条的几何与校验逻辑由 `planClipMove` / `applyClipStarts` / `editTimelineClip` / `planBackgroundAdd` 单测覆盖。
 
 - [ ] **Step 5: 提交**
 
