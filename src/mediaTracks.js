@@ -52,15 +52,20 @@ export function backgroundAtTime(clips, { color, image } = {}, time = 0) {
   if (image) return { kind: 'legacy-image', image }
   return { kind: 'color', color }
 }
-export function planBackgroundAdd(clips, clip, { duration, fps }) {
+/**
+ * 添加背景片段：默认 5 秒，播放头到下一个片段或工程结尾不足 5 秒时自动填充剩余时长。
+ * 播放头落在已有片段内部时无法插入（同一条轨道不能重叠）。
+ */
+export function planBackgroundAdd(clips, clip, { duration, fps, preferred = 5 }) {
   const limit = backgroundClipLimit(clips); if (limit) return { error: limit }
   const frame = 1 / fps, round = value => Math.round(value * fps) / fps
   const start = Math.max(0, Math.min(duration - frame, round(clip.start || 0)))
-  const length = Math.max(frame, Math.min(duration - start, round(clip.duration || 0)))
-  const placed = { ...clip, start, duration: length }
-  if (clips.some(c => placed.start < c.start + c.duration - 1e-8 && placed.start + placed.duration > c.start + 1e-8))
-    return { error: '背景片段不能重叠；请先调整相邻片段的时长或位置' }
-  return { clip: placed }
+  if (clips.some(c => start >= c.start - 1e-8 && start < c.start + c.duration - 1e-8))
+    return { error: '播放头位于已有背景片段内部，请先调整或删除该片段' }
+  const next = clips.reduce((edge, c) => c.start > start + 1e-8 ? Math.min(edge, c.start) : edge, duration)
+  const end = Math.min(start + preferred, next, duration)
+  const length = Math.max(frame, round(end - start))
+  return { clip: { ...clip, start, duration: length } }
 }
 /** 背景是单层轨道：列出还没有片段覆盖的时间空档，用于填入迁移出来的旧背景图。 */
 export function backgroundGaps(clips, duration, fps = 30) {

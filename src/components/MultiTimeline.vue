@@ -27,8 +27,8 @@
       <div class="track-row background-track">
         <div class="track-label track-card" title="背景始终位于最底层，按时间切换纯色或图片">
           <span class="layer-name">背景<small v-if="!backgroundClips.length"> · 兜底</small></span>
-          <button :disabled="disabled" title="在播放头添加纯色背景片段" @click="addColorBackground">＋纯色</button>
-          <input class="background-color-input" type="color" aria-label="新背景片段颜色" :value="backgroundDraftColor" :disabled="disabled" @input="backgroundDraftColor=$event.target.value" />
+          <button :disabled="disabled" title="选择颜色，在播放头添加纯色背景片段" @click="openBackgroundColorMenu">＋纯色</button>
+          <button :disabled="disabled" title="从素材库选择图片，在播放头添加背景片段" @click="openBackgroundImageMenu">＋图片</button>
         </div>
         <div class="track-lane background-lane" tabindex="-1" @pointerdown.self="beginSeek($event)" @contextmenu.prevent.stop="openBackgroundMenu($event,null)">
           <div v-for="clip in backgroundClips" :key="clip.id" class="model-clip background-clip" tabindex="0" :class="{selected:backgroundSelection===clip.id,multiselected:backgroundSelection===clip.id,image:clip.kind==='image'}" :aria-label="'背景片段 '+backgroundLabel(clip)" :title="backgroundTitle(clip)+' · 拖动移动；左右拖动两端裁剪；右键编辑'" :style="{left:clip.start/duration*100+'%',width:clip.duration/duration*100+'%',background:clip.kind==='color' ? clip.color : undefined}" @pointerdown="beginBackground($event,clip,'move')" @pointermove="moveBackground" @pointerup="endBackground" @pointercancel="endBackground" @lostpointercapture="endBackground" @contextmenu.prevent.stop="openBackgroundMenu($event,clip)">
@@ -96,6 +96,18 @@
         </template>
         <span v-else class="menu-hint">在左侧「＋纯色」添加纯色片段，或到素材库「图片」分类点「背景」添加图片片段。</span>
       </template>
+      <template v-else-if="menu.kind==='background-color'">
+        <span class="menu-section">添加纯色背景 · {{formatTimecode(props.time,props.fps)}} 起</span>
+        <div class="background-swatches" role="group" aria-label="预设背景颜色"><button v-for="preset in backgroundPresets" :key="preset.color" role="menuitem" class="background-swatch" :style="{background:preset.color}" :aria-label="preset.label+' '+preset.color" :title="preset.label+' '+preset.color" :disabled="disabled" @click="addBackgroundColor(preset.color)"></button></div>
+        <label>自定义颜色<input type="color" aria-label="新背景颜色" :value="backgroundDraftColor" @input="backgroundDraftColor=$event.target.value" /></label>
+        <button role="menuitem" :disabled="disabled" @click="addBackgroundColor(backgroundDraftColor)">用这个颜色添加</button>
+      </template>
+      <template v-else-if="menu.kind==='background-image'">
+        <span class="menu-section">添加图片背景 · {{formatTimecode(props.time,props.fps)}} 起</span>
+        <button v-for="asset in (menu.assets || [])" :key="asset.id" role="menuitem" :disabled="disabled" @click="addBackgroundImage(asset)">{{asset.name}}</button>
+        <span v-if="!(menu.assets || []).length" class="menu-hint">素材库里还没有图片，可以先导入一张。</span>
+        <button role="menuitem" :disabled="disabled" @click="importBackgroundImage">导入新图片…</button>
+      </template>
       <small class="menu-footer">修改可撤销 <kbd>Ctrl+Z</kbd> · 关闭 <kbd>Esc</kbd></small>
     </div></Teleport>
     <Teleport to="body"><KeyframeCurveEditor v-if="curveEdit" :value="curveEdit.easing" :description="curveEdit.description" :disabled="disabled || !curveEdit.refs.length || refsLocked(curveEdit.refs)" @apply="applyCurve" @cancel="closeCurve" /></Teleport>
@@ -114,9 +126,10 @@ import { numericDisplay } from '../numericDisplay.js'
 import TimecodeInput from './TimecodeInput.vue'
 import { formatTimecode } from '../timecode.js'
 import { editTimelineClip,timelineTicks } from '../timelineEditing.js'
+import { assetStore } from '../assetStore.js'
 import { groupedClipKeys,visibleClipKeys,uniqueKeyRefs,planKeyRefMove } from '../timelineKeyframes.js'
 const props=defineProps({clips:Array,backgroundClips:{type:Array,default:()=>[]},selectedIds:Array,duration:Number,fps:Number,time:Number,selectedId:String,selected:Object,labels:Object,pose:Object,runtimes:Object,transformFields:Array,disabled:Boolean,navigationDisabled:Boolean})
-const emit=defineEmits(['selection-change','clear-selection','batch-clips','batch-keys','select','seek','layer-state','rename-layer','reorder-layer','edit-clip','remove-key','move-key','toggle-key','edit-key-value','edit-event','paste-event','remove-event','begin-edit','end-edit','delete-selected','add-background','background-edit','delete-background'])
+const emit=defineEmits(['selection-change','clear-selection','batch-clips','batch-keys','select','seek','layer-state','rename-layer','reorder-layer','edit-clip','remove-key','move-key','toggle-key','edit-key-value','edit-event','paste-event','remove-event','begin-edit','end-edit','delete-selected','add-background-color','background-edit','delete-background','background-image','import-background-image'])
 const timelineRoot=ref(null),scrollArea=ref(null),ruler=ref(null),selectedKeys=ref([]),boxMode=ref(true),boxRect=ref(null),menu=ref(null),menuValue=ref(0),menuNativeValue=ref(0),menuTime=ref(0),menuEasing=ref('linear')
 const curveEdit=ref(null)
 const menuPreset=computed({get:()=>typeof menuEasing.value==='object' ? 'custom' : menuEasing.value,set:value=>{if(value==='custom')openCurveEditor();else menuEasing.value=value}})
@@ -282,9 +295,24 @@ function moveEvent(e){if(!eventDrag)return;const d=eventDrag,delta=(e.clientX-d.
 function endEvent(){eventDrag=null;dragging.value=false;snapTime.value=null;emit('end-edit')}
 
 const backgroundDraftColor=ref('#00b140'),backgroundSelection=ref(''),backgroundMenuColor=ref('#00b140')
+const backgroundPresets=[
+  {label:'绿幕',color:'#00b140'},{label:'白色',color:'#ffffff'},{label:'黑色',color:'#000000'},
+  {label:'灰色',color:'#808080'},{label:'红色',color:'#e02020'},{label:'黄色',color:'#ffe600'},
+  {label:'蓝色',color:'#1050d0'},{label:'天蓝',color:'#7fd4ff'},{label:'紫色',color:'#7a3fd0'},
+]
 function backgroundLabel(clip){return clip.kind==='color' ? '纯色 '+clip.color : '图片 · '+clip.name}
 function backgroundTitle(clip){return backgroundLabel(clip)+' · '+formatTimecode(clip.start,props.fps)+' → '+formatTimecode(clip.start+clip.duration,props.fps)}
-function addColorBackground(){if(props.disabled)return;emit('add-background',{kind:'color',color:backgroundDraftColor.value})}
+function openBackgroundColorMenu(e){if(props.disabled)return;positionMenu(e,{kind:'background-color',title:'添加纯色背景'})}
+async function openBackgroundImageMenu(e){
+  if(props.disabled)return
+  let assets=[]
+  try{assets=(await assetStore.list()).filter(asset=>asset.kind==='image')}catch{assets=[]}
+  positionMenu(e,{kind:'background-image',title:'添加图片背景',assets})
+}
+// 事件参数就是颜色字符串本身，编辑器直接交给 createColorBackgroundClip 校验。
+function addBackgroundColor(color){if(props.disabled || !color)return;emit('add-background-color',color);closeMenu()}
+function addBackgroundImage(asset){if(props.disabled || !asset)return;emit('background-image',asset);closeMenu()}
+function importBackgroundImage(){if(props.disabled)return;emit('import-background-image');closeMenu()}
 let backgroundDrag=null
 function beginBackground(e,clip,mode){if(props.disabled || e.button!==0 || e.ctrlKey || e.metaKey || e.shiftKey)return;closeMenu();selectedClips.value=[];selectedKeys.value=[];selectedEventId.value='';backgroundSelection.value=clip.id;emit('begin-edit');dragging.value=true;backgroundDrag={original:{...clip},mode,x:e.clientX,start:clip.start,duration:clip.duration,offset:0,width:e.currentTarget.closest('.track-lane').clientWidth,scrollLeft:scrollArea.value.scrollLeft};timelineRoot.value.setPointerCapture(e.pointerId);e.preventDefault()}
 function moveBackground(e){if(!backgroundDrag)return;const d=backgroundDrag,width=Math.max(1,d.width),delta=(e.clientX-d.x+scrollArea.value.scrollLeft-d.scrollLeft)/width*props.duration,tolerance=8/width*props.duration,targets=snapping.value && !e.altKey ? [0,props.duration,props.time,...props.backgroundClips.filter(c=>c.id!==d.original.id).flatMap(c=>[c.start,c.start+c.duration])] : [];if(d.mode==='move'){const plan=planClipMove(props.backgroundClips,[d.original],delta,{duration:props.duration,fps:props.fps,targets,tolerance});snapTime.value=plan.snapTime;if(plan.entries.length)emit('background-edit',d.original.id,{start:plan.entries[0].start});return}const result=editTimelineClip(d,delta,{duration:props.duration,fps:props.fps,targets,tolerance});snapTime.value=result.snapTime;emit('background-edit',d.original.id,{start:result.patch.start,duration:result.patch.duration})}
@@ -343,7 +371,10 @@ function applyBackgroundColor(e){backgroundMenuColor.value=e.target.value;if(men
 .curve-label { pointer-events:auto; max-width:100%; height:19px; padding:1px 5px!important; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:9px!important; border-radius:4px!important; background:var(--editor-accent-soft)!important; color:var(--editor-accent)!important; opacity:.8; }
 .curve-label:hover { opacity:1; }.key-property-row .key-marker { z-index:2; }
 .background-track .track-label { gap:6px; }.background-track .layer-name { font-weight:500; color:var(--editor-accent); }
-.background-color-input { width:26px; height:22px; padding:0; flex:none; }
+.background-track .track-label button { padding:4px 7px!important; }
+.background-swatches { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; }
+.timeline-menu .background-swatch { height:28px; padding:0!important; border-radius:7px!important; border-color:var(--editor-border)!important; }
+.timeline-menu .background-swatch:focus-visible { outline:2px solid var(--editor-focus); outline-offset:2px; }
 .background-clip { background-image:repeating-linear-gradient(45deg,#00000014 0 6px,transparent 6px 12px); }
 .background-clip .clip-name { text-shadow:0 1px 2px #ffffffaa; }
 .timeline-menu .menu-hint { color:var(--editor-muted); font-size:11px; padding:4px 2px; line-height:1.5; }

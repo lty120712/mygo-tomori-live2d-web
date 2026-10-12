@@ -31,18 +31,38 @@ test('按播放头解析背景：片段覆盖优先，其次 legacy 图片，最
   assert.deepEqual(backgroundAtTime([], { color: '#00b140' }, 3), { kind: 'color', color: '#00b140' })
 })
 
-test('添加背景片段限制越界并拒绝重叠', () => {
+test('添加背景片段默认 5 秒，空间不足时自动填充剩余时长', () => {
   const existing = createColorBackgroundClip('#111111', 4, 3)
-  const free = planBackgroundAdd([existing], createColorBackgroundClip('#222222', 3, 1), { duration: 10, fps: 30 })
+  const free = planBackgroundAdd([existing], createColorBackgroundClip('#222222', 0, 5), { duration: 10, fps: 30 })
   assert.equal(free.error, undefined)
-  assert.equal(free.clip.start, 3)
-  assert.equal(free.clip.duration, 1)
-  assert.match(planBackgroundAdd([existing], createColorBackgroundClip('#222222', 5, 6), { duration: 10, fps: 30 }).error, /重叠|越界/)
+  assert.equal(free.clip.start, 0)
+  assert.equal(free.clip.duration, 4)
+  const tail = planBackgroundAdd([existing], createColorBackgroundClip('#222222', 7, 5), { duration: 10, fps: 30 })
+  assert.equal(tail.clip.start, 7)
+  assert.equal(tail.clip.duration, 3)
+  assert.match(planBackgroundAdd([existing], createColorBackgroundClip('#222222', 5, 5), { duration: 10, fps: 30 }).error, /内部/)
+  // 片段起点也算内部，片段终点则可以接上一段新的
+  assert.match(planBackgroundAdd([existing], createColorBackgroundClip('#222222', 4, 5), { duration: 10, fps: 30 }).error, /内部/)
+  const after = planBackgroundAdd([existing], createColorBackgroundClip('#222222', 7, 5), { duration: 10, fps: 30 })
+  assert.equal(after.error, undefined)
+  assert.equal(after.clip.start, 7)
   const clamped = planBackgroundAdd([], createColorBackgroundClip('#222222', 99, 99), { duration: 10, fps: 30 })
   assert.equal(clamped.error, undefined)
   assert.ok(Math.abs(clamped.clip.start - (10 - 1 / 30)) < 1e-9)
   assert.ok(Math.abs(clamped.clip.duration - 1 / 30) < 1e-9)
   assert.match(planBackgroundAdd(Array.from({ length: 64 }, () => createColorBackgroundClip('#000000')), createColorBackgroundClip('#000000'), { duration: 10, fps: 30 }).error, /64/)
+})
+
+test('自动填充不会产生重叠，片段内部才拒绝', () => {
+  const clips = [createColorBackgroundClip('#111111', 2, 2), createColorBackgroundClip('#222222', 7, 2)]
+  for (const at of [0, 1.5, 4, 6, 9]) {
+    const plan = planBackgroundAdd(clips, createColorBackgroundClip('#333333', at, 5), { duration: 10, fps: 30 })
+    assert.equal(plan.error, undefined)
+    const added = plan.clip
+    assert.ok(added.start + added.duration <= 10 + 1e-8, '不超出工程时长')
+    assert.equal(clips.some(c => added.start < c.start + c.duration - 1e-8 && added.start + added.duration > c.start + 1e-8), false, '不与已有片段重叠')
+  }
+  assert.match(planBackgroundAdd(clips, createColorBackgroundClip('#333333', 3, 5), { duration: 10, fps: 30 }).error, /内部/)
 })
 
 test('背景片段共用一条轨道，移动受 0 与工程时长限制', () => {
