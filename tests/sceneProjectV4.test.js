@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createProject, readProject, SCENE_VERSION } from '../src/sceneProject.js'
 import { createColorBackgroundClip, createImageBackgroundClip } from '../src/mediaTracks.js'
+import { createAudioClip } from '../src/mediaTracks.js'
 
 const models = [{ category: 'tomori', name: 'chika', entry: 'model.json' }]
 
@@ -29,13 +30,15 @@ test('v3 旧工程读取后补齐新字段', () => {
   assert.deepEqual(p.assets, {})
 })
 
-test('v4 读取图片与背景引用，音频/打包素材的解析留待后续阶段', () => {
-  const p = readProject({ version: 4, clips: [], imageClips: [{ assetId: 'x' }], backgroundClips: [{ kind: 'color', color: '#123456', start: 1, duration: 4 }], audioClips: [{ id: 'z' }], assets: { a: 1 } }, models)
+test('v4 读取图片、背景与音频引用，打包素材的解析留待后续阶段', () => {
+  const p = readProject({ version: 4, clips: [], imageClips: [{ assetId: 'x' }], backgroundClips: [{ kind: 'color', color: '#123456', start: 1, duration: 4 }], audioClips: [{ assetId: 'z', name: '配乐.mp3', start: 2, duration: 5, track: 1, volume: .5 }], assets: { a: 1 } }, models)
   assert.equal(p.imageClips[0].assetId, 'x')
   assert.equal(p.backgroundClips[0].color, '#123456')
   assert.equal(p.backgroundClips[0].start, 1)
   assert.equal(p.backgroundClips[0].duration, 4)
-  assert.deepEqual(p.audioClips, [])
+  assert.equal(p.audioClips[0].assetId, 'z')
+  assert.equal(p.audioClips[0].track, 1)
+  assert.equal(p.audioClips[0].volume, .5)
   assert.deepEqual(p.assets, {})
 })
 
@@ -71,4 +74,35 @@ test('v3 旧工程没有背景片段，legacy 背景字段保留为兜底', () =
 
 test('未知版本仍拒绝', () => {
   assert.throws(() => readProject({ version: 9, clips: [] }, models), /版本/)
+})
+
+test('v4 音频片段往返保留素材引用、轨道、时间、音量与淡入淡出', () => {
+  const clip = createAudioClip({ id: 'song', name: '主题曲.mp3' }, 1, 4, 2)
+  clip.offset = .5; clip.volume = .6; clip.fadeIn = .4; clip.fadeOut = .3
+  const parsed = readProject({ ...createProject(), audioClips: [clip] }, [])
+  assert.deepEqual({ ...parsed.audioClips[0], id: clip.id }, clip)
+})
+
+test('v4 校验音频片段：列表、素材引用、上限与数值范围', () => {
+  assert.throws(() => readProject({ ...createProject(), audioClips: {} }, []), /音频片段列表无效/)
+  assert.throws(() => readProject({ ...createProject(), audioClips: [{ track: 0 }] }, []), /音频片段缺少素材引用/)
+  assert.throws(() => readProject({ ...createProject(), audioClips: Array.from({ length: 33 }, () => ({ assetId: 'song' })) }, []), /32/)
+  const parsed = readProject({
+    ...createProject(), duration: 10,
+    audioClips: [{ assetId: 'song', name: '  ', track: 99, start: 7, duration: 99, offset: -3, volume: 5, fadeIn: 99, fadeOut: -1 }],
+  }, [])
+  const clip = parsed.audioClips[0]
+  assert.equal(clip.track, 7)
+  assert.equal(clip.name, '音频')
+  assert.equal(clip.start, 7)
+  assert.equal(clip.duration, 3)
+  assert.equal(clip.offset, 0)
+  assert.equal(clip.volume, 1)
+  assert.equal(clip.fadeIn, 3)
+  assert.equal(clip.fadeOut, 0)
+})
+
+test('v3 旧工程没有音频片段', () => {
+  const parsed = readProject({ version: 3, aspectRatio: '16:9', fps: 30, duration: 10, clips: [] }, [])
+  assert.deepEqual(parsed.audioClips, [])
 })

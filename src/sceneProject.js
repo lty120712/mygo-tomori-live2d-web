@@ -1,7 +1,7 @@
 import { normalizeMotionEvents } from './timelineEvents.js'
 import { applyKeyEasing,normalizeEasing } from './keyframeEasing.js'
 import { normalizeParamValues } from './params.js'
-import { BACKGROUND_CLIP_LIMIT, createColorBackgroundClip, createImageBackgroundClip, createImageClip, visualClips } from './mediaTracks.js'
+import { AUDIO_CLIP_LIMIT, AUDIO_TRACK_LIMIT, BACKGROUND_CLIP_LIMIT, createAudioClip, createColorBackgroundClip, createImageBackgroundClip, createImageClip, visualClips } from './mediaTracks.js'
 
 export const SCENE_VERSION = 4
 export const SCENE_WIDTH = 960
@@ -169,9 +169,25 @@ export function readProject(data, models) {
       return clip
     })
   }
+  if (data.version === 4 && data.audioClips != null) {
+    if (!Array.isArray(data.audioClips)) throw new Error('音频片段列表无效')
+    if (data.audioClips.length > AUDIO_CLIP_LIMIT) throw new Error('单个工程最多 32 个音频片段')
+    project.audioClips = data.audioClips.map(raw => {
+      if (!raw || typeof raw.assetId !== 'string' || !raw.assetId.trim()) throw new Error('音频片段缺少素材引用')
+      const clip = createAudioClip({ id: raw.assetId.trim(), name: typeof raw.name === 'string' ? raw.name.trim().slice(0, 200) : '' })
+      clip.track = Math.round(number(raw.track, 0, 0, AUDIO_TRACK_LIMIT - 1))
+      clip.start = number(raw.start, 0, 0, project.duration - 1 / project.fps)
+      clip.duration = number(raw.duration, project.duration - clip.start, 1 / project.fps, project.duration - clip.start)
+      clip.offset = number(raw.offset, 0, 0, 6000)
+      clip.volume = number(raw.volume, 1, 0, 1)
+      clip.fadeIn = number(raw.fadeIn, 0, 0, clip.duration)
+      clip.fadeOut = number(raw.fadeOut, 0, 0, clip.duration)
+      return clip
+    })
+  }
   const all = visualClips(project)
   for(const track of new Set(all.map(c=>c.track))){const first=all.find(c=>c.track===track);for(const clip of all.filter(c=>c.track===track)){clip.layerName=first.layerName;clip.layerLocked=first.layerLocked;clip.layerHidden=first.layerHidden}}
-  // Audio clips and packed assets are reserved for M4.
+  // Packed assets (assets) are reserved for later.
   if (data.version === 3) {
     project.imageClips = []
     project.backgroundClips = []
