@@ -1,7 +1,7 @@
 import { normalizeMotionEvents } from './timelineEvents.js'
 import { applyKeyEasing,normalizeEasing } from './keyframeEasing.js'
 import { normalizeParamValues } from './params.js'
-import { createImageClip, visualClips } from './mediaTracks.js'
+import { BACKGROUND_CLIP_LIMIT, createColorBackgroundClip, createImageBackgroundClip, createImageClip, visualClips } from './mediaTracks.js'
 
 export const SCENE_VERSION = 4
 export const SCENE_WIDTH = 960
@@ -154,9 +154,24 @@ export function readProject(data, models) {
       return clip
     })
   }
+  if (data.version === 4 && data.backgroundClips != null) {
+    if (!Array.isArray(data.backgroundClips)) throw new Error('背景片段列表无效')
+    if (data.backgroundClips.length > BACKGROUND_CLIP_LIMIT) throw new Error('单个工程最多 64 个背景片段')
+    project.backgroundClips = data.backgroundClips.map(raw => {
+      if (!raw || (raw.kind !== 'color' && raw.kind !== 'image')) throw new Error('背景片段类型无效')
+      const assetId = typeof raw.assetId === 'string' ? raw.assetId.trim() : ''
+      if (raw.kind === 'image' && !assetId) throw new Error('背景片段缺少素材引用')
+      const clip = raw.kind === 'image'
+        ? createImageBackgroundClip({ id: assetId, name: typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim().slice(0, 200) : '背景图片' })
+        : createColorBackgroundClip(raw.color)
+      clip.start = number(raw.start, 0, 0, project.duration - 1 / project.fps)
+      clip.duration = number(raw.duration, project.duration - clip.start, 1 / project.fps, project.duration - clip.start)
+      return clip
+    })
+  }
   const all = visualClips(project)
   for(const track of new Set(all.map(c=>c.track))){const first=all.find(c=>c.track===track);for(const clip of all.filter(c=>c.track===track)){clip.layerName=first.layerName;clip.layerLocked=first.layerLocked;clip.layerHidden=first.layerHidden}}
-  // Background/audio clips and packed assets are reserved for M3/M4.
+  // Audio clips and packed assets are reserved for M4.
   if (data.version === 3) {
     project.imageClips = []
     project.backgroundClips = []

@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createProject, readProject, SCENE_VERSION } from '../src/sceneProject.js'
+import { createColorBackgroundClip, createImageBackgroundClip } from '../src/mediaTracks.js'
 
 const models = [{ category: 'tomori', name: 'chika', entry: 'model.json' }]
 
@@ -28,12 +29,44 @@ test('v3 旧工程读取后补齐新字段', () => {
   assert.deepEqual(p.assets, {})
 })
 
-test('v4 读取图片引用，背景/音频/打包素材的解析留待后续阶段', () => {
-  const p = readProject({ version: 4, clips: [], imageClips: [{ assetId: 'x' }], backgroundClips: [{ id: 'y' }], audioClips: [{ id: 'z' }], assets: { a: 1 } }, models)
+test('v4 读取图片与背景引用，音频/打包素材的解析留待后续阶段', () => {
+  const p = readProject({ version: 4, clips: [], imageClips: [{ assetId: 'x' }], backgroundClips: [{ kind: 'color', color: '#123456', start: 1, duration: 4 }], audioClips: [{ id: 'z' }], assets: { a: 1 } }, models)
   assert.equal(p.imageClips[0].assetId, 'x')
-  assert.deepEqual(p.backgroundClips, [])
+  assert.equal(p.backgroundClips[0].color, '#123456')
+  assert.equal(p.backgroundClips[0].start, 1)
+  assert.equal(p.backgroundClips[0].duration, 4)
   assert.deepEqual(p.audioClips, [])
   assert.deepEqual(p.assets, {})
+})
+
+test('v4 背景片段往返保留类型、颜色、素材引用与时间', () => {
+  const color = createColorBackgroundClip('#80304a', 1, 3), image = createImageBackgroundClip({ id: 'asset-1', name: '天空.png' }, 4, 4)
+  const project = { ...createProject(), backgroundClips: [color, image] }
+  const parsed = readProject(JSON.parse(JSON.stringify(project)), [])
+  assert.equal(parsed.backgroundClips.length, 2)
+  assert.deepEqual({ ...parsed.backgroundClips[0], id: color.id }, color)
+  assert.deepEqual({ ...parsed.backgroundClips[1], id: image.id }, image)
+})
+
+test('v4 校验背景片段：类型、素材引用、上限与越界时间', () => {
+  assert.throws(() => readProject({ ...createProject(), backgroundClips: {} }, []), /背景片段列表无效/)
+  assert.throws(() => readProject({ ...createProject(), backgroundClips: [{ kind: 'video' }] }, []), /背景片段类型无效/)
+  assert.throws(() => readProject({ ...createProject(), backgroundClips: [{ kind: 'image' }] }, []), /背景片段缺少素材引用/)
+  assert.throws(() => readProject({ ...createProject(), backgroundClips: Array.from({ length: 65 }, () => ({ kind: 'color', color: '#000000' })) }, []), /64/)
+  const parsed = readProject({ ...createProject(), duration: 10, backgroundClips: [{ kind: 'color', color: 'red', start: 7, duration: 99 }] }, [])
+  assert.equal(parsed.backgroundClips[0].color, '#00b140')
+  assert.equal(parsed.backgroundClips[0].start, 7)
+  assert.equal(parsed.backgroundClips[0].duration, 3)
+  assert.equal(parsed.backgroundClips[0].fit, 'fill')
+})
+
+test('v3 旧工程没有背景片段，legacy 背景字段保留为兜底', () => {
+  const legacy = { version: 3, aspectRatio: '16:9', fps: 30, duration: 10, background: '#123456', backgroundImage: 'data:image/png;base64,AA', backgroundImageName: '旧背景.png', clips: [] }
+  const parsed = readProject(legacy, [])
+  assert.deepEqual(parsed.backgroundClips, [])
+  assert.equal(parsed.background, '#123456')
+  assert.equal(parsed.backgroundImage, 'data:image/png;base64,AA')
+  assert.equal(parsed.backgroundImageName, '旧背景.png')
 })
 
 test('未知版本仍拒绝', () => {
