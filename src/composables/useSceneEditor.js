@@ -1,4 +1,4 @@
-import { visualClips, visualLayerFilter, createImageClip, appendVisualClips, visualClipLimit, backgroundAtTime, backgroundClipLimit, createClipFromTemplate, createColorBackgroundClip, createImageBackgroundClip, planBackgroundAdd, migrateLegacyBackground, AUDIO_TRACK_LIMIT, audioClipLimit, audioClipTemplate, createAudioClip, createAudioClipFromTemplate } from '../mediaTracks.js'
+import { visualClips, visualLayerFilter, createImageClip, appendVisualClips, visualClipLimit, backgroundAtTime, backgroundClipLimit, createClipFromTemplate, createColorBackgroundClip, createImageBackgroundClip, planBackgroundAdd, migrateLegacyBackground, AUDIO_TRACK_LIMIT, audioClipLimit, audioClipPlacement, audioClipTemplate, createAudioClip, createAudioClipFromTemplate } from '../mediaTracks.js'
 import { createAudioScheduler } from '../audioScheduler.js'
 import { assetStore } from '../assetStore.js'
 import { LEGACY_SCENE_KEY, SCENE_KEY, localStore, restoreScene } from '../localStore.js'
@@ -283,9 +283,18 @@ export function useSceneEditor() {
     return true
   }
   function addAudioClip(asset,track=0){
-    const start=audioStart(),length=Math.max(1/project.fps,Math.min(asset.duration || 5,project.duration-start))
+    const start=audioStart()
+    const placement=audioClipPlacement(asset.duration,start,project.duration,project.fps)
     refreshAudioAssets()
-    return placeAudioClip(createAudioClip(asset,start,length,audioTrack(track)))
+    const added=placeAudioClip(createAudioClip(asset,start,placement.duration,audioTrack(track)))
+    // 长音频进入时把工程补足到片段结尾（同一步撤销），避免被截成工程剩余时长。
+    if(added && placement.projectDuration>project.duration){
+      project.duration=placement.projectDuration
+      message.value+='；工程时长已延长到 '+placement.projectDuration.toFixed(1)+' 秒'
+    }else if(added && placement.truncated){
+      message.value+='；素材超过 600 秒上限，已截断到工程结尾'
+    }
+    return added
   }
   function editAudioClip(id,patch){
     const clip=project.audioClips.find(c=>c.id===id);if(!clip)return false

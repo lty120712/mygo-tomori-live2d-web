@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { AUDIO_CLIP_LIMIT, AUDIO_TRACK_LIMIT, audibleAudioClips, audioClipLimit, audioClipTemplate, audioClipsAtTime, audioGainAt, createAudioClip, createAudioClipFromTemplate, planAudioPlayback } from '../src/mediaTracks.js'
+import { AUDIO_CLIP_LIMIT, AUDIO_TRACK_LIMIT, audibleAudioClips, audioClipLimit, audioClipPlacement, audioClipTemplate, audioClipsAtTime, audioGainAt, createAudioClip, createAudioClipFromTemplate, planAudioPlayback } from '../src/mediaTracks.js'
 
 const asset = { id: 'song', name: '主题曲.mp3', kind: 'audio', duration: 12 }
 const song = (start = 0, duration = 5, track = 0) => createAudioClip(asset, start, duration, track)
@@ -61,6 +61,18 @@ test('复制音频片段带走素材与时长，粘贴可换轨道', () => {
   assert.deepEqual(template, { assetId: 'song', name: '主题曲.mp3', duration: 2.5, volume: .6, fadeIn: .5, fadeOut: 0, offset: 0 })
   const pasted = createAudioClipFromTemplate(template, 6, 2, 2)
   assert.deepEqual({ ...pasted, id: undefined }, { id: undefined, assetId: 'song', name: '主题曲.mp3', track: 2, start: 6, duration: 2, offset: 0, volume: .6, fadeIn: .5, fadeOut: 0 })
+})
+
+test('音频片段长度按素材决定，超出工程时把工程时长补足到片段结尾', () => {
+  assert.deepEqual(audioClipPlacement(3, 0, 10, 30), { duration: 3, projectDuration: 10, truncated: false })
+  assert.deepEqual(audioClipPlacement(188.3, 0, 10, 30), { duration: 188.3, projectDuration: 188.3, truncated: false })
+  assert.deepEqual(audioClipPlacement(5, 9, 10, 30), { duration: 5, projectDuration: 14, truncated: false })
+  const capped = audioClipPlacement(900, 0, 10, 30)
+  assert.equal(capped.projectDuration, 600)
+  assert.equal(capped.duration, 600)
+  assert.equal(capped.truncated, true)
+  assert.equal(audioClipPlacement(0, 0, 10, 30).duration, 1 / 30)
+  assert.equal(audioClipPlacement(undefined, 2, 4, 30).projectDuration, 4)
 })
 
 test('静音与独奏按轨道生效：默认全部参与，有轨道独奏时只播独奏轨道', () => {

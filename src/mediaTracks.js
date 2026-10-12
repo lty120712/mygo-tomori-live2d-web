@@ -143,6 +143,17 @@ export function createAudioClip(asset, start = 0, duration = 5, track = 0) {
     start, duration, offset: 0, volume: 1, fadeIn: 0, fadeOut: 0,
   }
 }
+/**
+ * 添加音频片段时决定片段长度与工程时长：素材比工程剩余时长长时把工程补足到片段结尾
+ * （上限 600 秒），避免长音频一进来就被截成工程剩余时长。
+ */
+export function audioClipPlacement(assetDuration, start, projectDuration, fps = 30, limit = 600) {
+  const frame = 1 / fps, round = value => Math.round(value * fps) / fps
+  const wanted = Math.max(frame, Number(assetDuration) || 0)
+  const end = start + wanted
+  const projectEnd = Math.min(limit, Math.max(projectDuration, end))
+  return { duration: Math.max(frame, round(Math.min(end, projectEnd) - start)), projectDuration: projectEnd, truncated: end > projectEnd + 1e-9 }
+}
 export function audioClipsAtTime(clips, time) {
   return (clips || []).filter(c => time >= c.start - 1e-9 && time < c.start + c.duration - 1e-9)
 }
