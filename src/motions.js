@@ -87,7 +87,10 @@ async function readMotionInfo(url) {
       if (eq <= 0 || line.startsWith('$')) continue
       pairs.push({ name: line.slice(0, eq), values: line.slice(eq + 1).split(',').map(Number) })
     }
-    return { seconds: parseMtnDuration(text), carriesExpression: carriesExpression(pairs),parameterIds:pairs.map(p=>p.name),effects:[] }
+    const fps=Number(text.match(/^\s*\$fps\s*=\s*(\d+(?:\.\d+)?)\s*$/m)?.[1] || 30)
+    const settings=Object.fromEntries(text.split(/\r?\n/).filter(line=>line.trim().startsWith('$')).map(line=>line.trim().split('=').map(s=>s.trim())))
+    const fade=key=>Number(settings['$'+key] ?? 1000)/1000
+    return {sample:{fps,curves:Object.fromEntries(pairs.map(p=>[p.name,p.values])),duration:parseMtnDuration(text),fadeIn:fade('fadein'),fadeOut:fade('fadeout')},seconds:parseMtnDuration(text),carriesExpression:carriesExpression(pairs),parameterIds:pairs.map(p=>p.name),effects:[]}
   } catch {
     return null
   }
@@ -111,6 +114,7 @@ export async function collectMotionInfo(modelUrl, motions) {
       const seconds = valid.map(i => i.seconds).filter(v => typeof v === 'number' && v > 0)
       if (seconds.length === 0 && valid.length === 0) return
       result[group] = {
+        samples:infos.map(i=>i?.sample || null),
         parameterIds:[...new Set(valid.flatMap(i=>i.parameterIds || []))],
         effects:[...new Set(valid.flatMap(i=>i.effects || []))],
         seconds: seconds.length > 0 ? Math.max(...seconds) : null,

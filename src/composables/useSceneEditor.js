@@ -1,3 +1,4 @@
+import {sampleTimelinePose} from '../timelinePose.js'
 import {applyCanvasSelection} from '../canvasSelection.js'
 import {sceneParameterOverrides} from '../sceneParameterPriority.js'
 import {expressionParameterIds,motionEffectParameterIds} from '../live2dSceneAdapter.js'
@@ -10,7 +11,7 @@ import { ref, reactive, shallowReactive, computed, watch, onMounted, onBeforeUnm
 import models from 'virtual:model-manifest'
 import { useRecorder } from './useRecorder.js'
 import { resolveParamId, normalizeParamValues } from '../params.js'
-import { renderModelNow, stopModelMotion, resetModelPose, playTimelineMotion } from '../live2dSceneAdapter.js'
+import { renderModelNow, stopModelMotion, resetModelPose } from '../live2dSceneAdapter.js'
 import { sceneMouseParams } from '../sceneMouseTracking.js'
 import { moveClipKey, editKeyRefs } from '../timelineKeyframes.js'
 import { changeProjectFps } from '../sceneFrameRate.js'
@@ -338,17 +339,20 @@ export function useSceneEditor() {
         if(r.livePreview && !playing.value){r.sdk.setParams(mouse);continue}
         const expr=activeEvent(clip,'expression',time.value,project.fps)
         const name=expr?.name || r.expressions.find(e=>/^(default|idle|exp_idle01\.exp3)$/i.test(e)) || ''
-        if(name && name!==r.expression){r.sdk.setExpression(name);r.expression=name}
-        {
-          const motion=activeEvent(clip,'motion',time.value,project.fps)
-          if(playing.value && motion && (r.timelineMotion!==motion || !r.wasVisible)){playTimelineMotion(r.sdk,motion.name,(motion.offset || 0)+state.frame/project.fps-motion.frame/project.fps);r.timelineMotion=motion}
-          else if(!motion && r.timelineMotion){resetModelPose(r.sdk);r.timelineMotion=null;r.expression='';if(name){r.sdk.setExpression(name);r.expression=name}}
-        }
         const activeMotion=activeEvent(clip,'motion',time.value,project.fps)
-        const motionInfo=activeMotion && (playing.value || r.timelineMotion===activeMotion) ? r.info[activeMotion.name] : null
+        if(r.timelineMotion!==activeMotion || !r.wasVisible){resetModelPose(r.sdk);r.timelineMotion=activeMotion}
+        const motionInfo=activeMotion ? r.info[activeMotion.name] : null
         const owned=[...(motionInfo?.parameterIds || []),...motionEffectParameterIds(r.sdk,motionInfo?.effects),...expressionParameterIds(r.sdk,expr?.name)]
-        r.sdk.setParams(sceneParameterOverrides(state.params,mouse,owned,r.groups))
-        if(!playing.value)renderModelNow(r.sdk)
+        const base=sceneParameterOverrides(state.params,mouse,owned,r.groups)
+        const pose=sampleTimelinePose(r.sdk,r.info,activeMotion,name,expr ? Math.max(0,(state.frame-expr.frame)/project.fps) : 1000,state.frame,project.fps,r.groups,base)
+        // Keep released parameters neutral until an authored body track takes over.
+        // This also prevents an old native expression queue leaking into the pose.
+        r.sampledParameters ||= new Set()
+        Object.keys(pose).forEach(key=>r.sampledParameters.add(key))
+        const released=Object.fromEntries(r.groups.flatMap(g=>g.params).filter(p=>r.sampledParameters.has(p.key)).map(p=>[p.key,p.default]))
+        r.sdk.setParams({...released,...base,...pose})
+        r.expression=name
+        renderModelNow(r.sdk)
       } else if(r.wasVisible)r.sdk.setParams({})
       r.lastFrame=state.frame;r.wasVisible=visible
       r.renderRevision=(r.renderRevision || 0)+1
