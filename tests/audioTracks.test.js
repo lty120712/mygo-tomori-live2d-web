@@ -40,10 +40,12 @@ test('播放计划从中点起播时前移源偏移、缩短剩余时长并按�
   const plan = planAudioPlayback([clip], 5, 30)
   assert.equal(plan.length, 1)
   const { gain, ...rest } = plan[0]
-  assert.deepEqual({ ...rest, id: undefined }, { id: undefined, assetId: 'song', name: '主题曲.mp3', track: 1, offset: 4, duration: 3, volume: .7, fadeIn: 3, fadeOut: 2 })
+  assert.deepEqual({ ...rest, id: undefined }, { id: undefined, assetId: 'song', name: '主题曲.mp3', track: 1, offset: 4, duration: 3, volume: .7, fadeIn: 1, fadeOut: 2 })
   assert.ok(Math.abs(gain - .525) < 1e-9)
   assert.deepEqual(planAudioPlayback([clip], 2, 30)[0].offset, 1)
   assert.deepEqual(planAudioPlayback([clip], 8, 30), [])
+  // 已经播完淡入窗口时不再安排淡入
+  assert.equal(planAudioPlayback([{ ...clip, fadeIn: 1 }], 5, 30)[0].fadeIn, 0)
 })
 
 test('播放计划按时间排序，多个轨道同时出声', () => {

@@ -149,7 +149,7 @@ export function audioGainAt(clip, time) {
 export function planAudioPlayback(clips, time, fps = 30) {
   return audioClipsAtTime(clips, time)
     .slice()
-    .sort((a, b) => a.start - b.start || String(a.id).localeCompare(String(b.id)))
+    .sort((a, b) => a.start - b.start || (a.track ?? 0) - (b.track ?? 0) || String(a.id).localeCompare(String(b.id)))
     .map(clip => {
       const elapsed = Math.max(0, time - clip.start)
       const remaining = Math.max(0, clip.duration - elapsed)
@@ -159,7 +159,8 @@ export function planAudioPlayback(clips, time, fps = 30) {
         duration: remaining,
         gain: audioGainAt(clip, time),
         volume: Math.max(0, Math.min(1, clip.volume ?? 1)),
-        fadeIn: Math.max(0, Math.min(clip.fadeIn || 0, remaining)),
+        // 淡入是从片段起点开始的窗口，中途起播时只剩没走完的部分；淡出固定在片段末尾。
+        fadeIn: Math.max(0, Math.min((clip.fadeIn || 0) - elapsed, remaining)),
         fadeOut: Math.max(0, Math.min(clip.fadeOut || 0, remaining)),
       }
     })
