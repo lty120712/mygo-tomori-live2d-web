@@ -1,4 +1,4 @@
-import { uid, clipVisible } from './sceneProject.js'
+import { uid, clipVisible, splitClip } from './sceneProject.js'
 
 export const isImageClip = clip => !!clip?.assetId && !clip.model
 export const visualClips = project => [...project.clips, ...(project.imageClips || [])]
@@ -213,4 +213,17 @@ export function createAudioClipFromTemplate(template, start = 0, duration = temp
   clip.fadeOut = Math.max(0, Math.min(template.fadeOut || 0, duration))
   clip.offset = Math.max(0, template.offset || 0)
   return clip
+}
+/**
+ * 在播放头切割音频片段：右半段源偏移随切割点前移；淡入留给前半段、淡出留给后半段，
+ * 因此切割不会凭空多出或丢掉淡入淡出。播放头不在片段内部时返回 null。
+ */
+export function splitAudioClip(clip, time) {
+  const right = splitClip(clip, time)
+  if (!right) return null
+  right.fadeIn = 0
+  right.fadeOut = Math.min(right.fadeOut || 0, right.duration)
+  clip.fadeIn = Math.min(clip.fadeIn || 0, clip.duration)
+  clip.fadeOut = 0
+  return right
 }

@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { BACKGROUND_CLIP_LIMIT, backgroundClipLimit, backgroundAtTime, backgroundClipTemplate, backgroundGaps, createClipFromTemplate, createColorBackgroundClip, createImageBackgroundClip, planBackgroundAdd, migrateLegacyBackground, paintBackground, visualLayerFilter } from '../src/mediaTracks.js'
+import { splitClip } from '../src/sceneProject.js'
 import { planClipMove, applyClipStarts } from '../src/clipSelection.js'
 import { createProject } from '../src/sceneProject.js'
 
@@ -167,4 +168,17 @@ test('视觉可见性：没有独见时全部显示，任一轨道独见时只�
   assert.equal(soloBackground.solo, true)
   assert.equal(soloBackground.clipVisible({ track: 0 }), false)
   assert.equal(soloBackground.backgroundVisible(), true)
+})
+
+test('在播放头切割背景片段：两段相邻、不留 offset、保留颜色与隐藏独见标记', () => {
+  const clip = { ...createColorBackgroundClip('#123456', 2, 8), layerHidden: true, layerSolo: true }
+  const right = splitClip(clip, 6)
+  assert.equal(clip.start, 2); assert.equal(clip.duration, 4)
+  assert.equal(right.start, 6); assert.equal(right.duration, 4)
+  assert.equal(right.color, '#123456')
+  assert.equal(right.layerHidden, true); assert.equal(right.layerSolo, true)
+  assert.equal('offset' in right, false)
+  assert.notEqual(right.id, clip.id)
+  assert.equal(splitClip({ ...createColorBackgroundClip('#123456', 2, 3) }, 2), null)
+  assert.equal(splitClip({ ...createColorBackgroundClip('#123456', 2, 3) }, 5), null)
 })

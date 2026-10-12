@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { AUDIO_CLIP_LIMIT, AUDIO_TRACK_LIMIT, audibleAudioClips, audioClipLimit, audioClipPlacement, audioClipTemplate, audioClipsAtTime, audioGainAt, createAudioClip, createAudioClipFromTemplate, planAudioPlayback } from '../src/mediaTracks.js'
+import { AUDIO_CLIP_LIMIT, AUDIO_TRACK_LIMIT, audibleAudioClips, audioClipLimit, audioClipPlacement, audioClipTemplate, audioClipsAtTime, audioGainAt, createAudioClip, createAudioClipFromTemplate, planAudioPlayback, splitAudioClip } from '../src/mediaTracks.js'
 
 const asset = { id: 'song', name: '主题曲.mp3', kind: 'audio', duration: 12 }
 const song = (start = 0, duration = 5, track = 0) => createAudioClip(asset, start, duration, track)
@@ -61,6 +61,24 @@ test('复制音频片段带走素材与时长，粘贴可换轨道', () => {
   assert.deepEqual(template, { assetId: 'song', name: '主题曲.mp3', duration: 2.5, volume: .6, fadeIn: .5, fadeOut: 0, offset: 0 })
   const pasted = createAudioClipFromTemplate(template, 6, 2, 2)
   assert.deepEqual({ ...pasted, id: undefined }, { id: undefined, assetId: 'song', name: '主题曲.mp3', track: 2, start: 6, duration: 2, offset: 0, volume: .6, fadeIn: .5, fadeOut: 0 })
+})
+
+test('切割音频片段：右半段前移源偏移，淡入留前半、淡出留后半，边界外拒绝', () => {
+  const clip = { ...createAudioClip(asset, 2, 10, 1), offset: 1, volume: .6, fadeIn: 3, fadeOut: 2 }
+  const right = splitAudioClip(clip, 7)
+  assert.equal(clip.start, 2); assert.equal(clip.duration, 5)
+  assert.equal(clip.offset, 1); assert.equal(clip.fadeIn, 3); assert.equal(clip.fadeOut, 0)
+  assert.equal(right.start, 7); assert.equal(right.duration, 5)
+  assert.equal(right.offset, 6); assert.equal(right.volume, .6)
+  assert.equal(right.fadeIn, 0); assert.equal(right.fadeOut, 2)
+  assert.notEqual(right.id, clip.id)
+  assert.equal(splitAudioClip(createAudioClip(asset, 2, 5, 0), 2), null)
+  assert.equal(splitAudioClip(createAudioClip(asset, 2, 5, 0), 7), null)
+  // 切割点落在淡出窗口里时，右半段只保留剩余部分
+  const late = { ...createAudioClip(asset, 0, 10, 0), fadeOut: 4 }
+  const lateRight = splitAudioClip(late, 7)
+  assert.equal(lateRight.duration, 3)
+  assert.equal(lateRight.fadeOut, 3)
 })
 
 test('音频片段长度按素材决定，超出工程时把工程时长补足到片段结尾', () => {

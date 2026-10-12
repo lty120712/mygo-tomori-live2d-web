@@ -68,11 +68,13 @@ export function sampleClip(clip, time, fps, groups = []) {
 export function splitClip(clip, time) {
   const elapsed = time - clip.start
   if (elapsed <= 0 || elapsed >= clip.duration) return null
-  const right = structuredClone(clip)
+  // 用 JSON 深拷贝：调用方传进来的常是 Vue 响应式对象，structuredClone 在 Proxy 上会抛错。
+  const right = JSON.parse(JSON.stringify(clip))
   right.id = uid()
   right.start = time
   right.duration -= elapsed
-  right.offset += elapsed
+  // 只有带源偏移的片段（模型 / 图片 / 音频）才推进偏移；背景片段没有这个字段。
+  if (typeof right.offset === 'number') right.offset += elapsed
   clip.duration = elapsed
   return right
 }
