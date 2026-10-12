@@ -1,5 +1,6 @@
 import { normalizeMotionEvents } from './timelineEvents.js'
 import { splitClip } from './sceneProject.js'
+import { visualClipLimit } from './mediaTracks.js'
 const clone=value=>JSON.parse(JSON.stringify(value))
 export function copyClips(clips,ids,fps){
   const selected=clips.filter(c=>ids.includes(c.id) && !c.layerLocked)
@@ -10,7 +11,7 @@ export function planClipSplit(clips,ids,time){
   if(selected.some(c=>c.layerLocked))return {error:'图层已锁定，请先解锁后切割'}
   const eligible=selected.filter(c=>time>c.start+1e-8 && time<c.start+c.duration-1e-8)
   if(!eligible.length)return {error:'播放头必须位于所选片段内部'}
-  if(clips.length+eligible.length>16)return {error:'切割后超过 16 个模型片段，无法执行整组切割'}
+  const error=visualClipLimit([...clips,...eligible]);if(error)return {error:'切割后超过限制：'+error}
   const left=eligible.map(clone),right=left.map(c=>splitClip(c,time))
   return {left,right}
 }
@@ -42,7 +43,7 @@ export function applyClipStarts(clips,entries,duration,fps){
 }
 export function planClipPaste(clips,clipboard,time,duration,fps){
   if(!clipboard?.clips?.length)return {error:'请先复制模型片段'}
-  if(clips.length+clipboard.clips.length>16)return {error:'单个工程最多 16 个模型片段'}
+  const error=visualClipLimit([...clips,...clipboard.clips]);if(error)return {error}
   const existing=[...new Set(clips.map(c=>c.track))].sort((a,b)=>a-b),tracks=[...new Set(clipboard.clips.map(c=>c.track))].sort((a,b)=>a-b)
   const copies=clone(clipboard.clips),at=Math.round(time*fps)/fps,ratio=fps/clipboard.fps
   for(const c of copies){

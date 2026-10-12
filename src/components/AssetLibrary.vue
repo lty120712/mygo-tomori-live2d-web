@@ -37,7 +37,8 @@
             <img v-if="a.kind==='image'" :src="a.thumb || ''" alt="" class="media-thumb" />
             <span v-else class="media-thumb media-audio" aria-hidden="true">♪</span>
             <span class="model-copy"><strong>{{ a.name }}</strong><small>{{ formatSize(a.size) }}<template v-if="a.kind==='audio' && a.duration"> · {{ a.duration.toFixed(1) }}s</template></small></span>
-            <button class="media-delete" :aria-label="'删除素材 '+a.name" title="删除素材" @click="removeAsset(a)">×</button>
+            <button v-if="a.kind==='image'" :disabled="disabled" :aria-label="'添加图片 '+a.name" title="添加到时间线" @click="emit('add-image',a)">＋</button>
+            <button class="media-delete" :disabled="disabled || clips.some(c=>c.assetId===a.id)" :aria-label="'删除素材 '+a.name" :title="clips.some(c=>c.assetId===a.id) ? '请先移除工程中引用该素材的片段' : '删除素材'" @click="removeAsset(a)">×</button>
           </div>
           <div v-if="!currentAssets.length" class="library-empty"><span>还没有{{ activeTab==='image' ? '图片' : '音频' }}素材</span><button @click="pickFile">导入一个</button></div>
         </div>
@@ -52,7 +53,7 @@ import ModelPortrait from './ModelPortrait.vue'
 import { describeModel, filterModelLibrary } from '../modelLibrary.js'
 import { assetStore } from '../assetStore.js'
 const props = defineProps({ models: { type: Array, default: () => [] }, clips: { type: Array, default: () => [] }, open: Boolean, disabled: Boolean })
-const emit = defineEmits(['toggle', 'add'])
+const emit = defineEmits(['toggle', 'add', 'add-image'])
 const activeTab = ref('model')
 const assets = ref([])
 const fileInput = ref(null)
@@ -79,7 +80,7 @@ async function onFilePicked(event) {
   try { await assetStore.importFile(file); refreshAssets() }
   catch (e) { alert(e.message || '导入失败') }
 }
-async function removeAsset(a) { if (confirm('删除素材「' + a.name + '」？')) { await assetStore.remove(a.id); refreshAssets() } }
+async function removeAsset(a) { if(props.disabled || props.clips.some(c=>c.assetId===a.id))return; if (confirm('删除素材「' + a.name + '」？')) { await assetStore.remove(a.id); refreshAssets() } }
 function formatSize(size) { if (size >= 1048576) return (size / 1048576).toFixed(1) + 'MB'; if (size >= 1024) return Math.round(size / 1024) + 'KB'; return size + 'B' }
 onMounted(refreshAssets)
 </script>
@@ -106,7 +107,7 @@ header { display:flex; justify-content:space-between; align-items:center; paddin
 .media-toolbar { display:flex; align-items:center; gap:10px; padding:12px 16px; border-bottom:1px solid var(--editor-border); }
 .media-toolbar .import-btn { background:var(--editor-accent); color:var(--editor-on-accent,#fff); border-radius:9px; padding:8px 14px; }
 .media-hint { color:var(--editor-muted); font-size:10px; }
-.media-card { display:flex; gap:10px; align-items:center; width:100%; padding:8px 9px; margin-bottom:5px; background:var(--editor-soft); border-radius:11px; }
+.media-card { display:flex; gap:10px; align-items:center; width:100%; box-sizing:border-box; padding:8px 9px; margin-bottom:5px; background:var(--editor-soft); border-radius:11px; }
 .media-thumb { width:40px; height:40px; object-fit:cover; border-radius:8px; background:var(--editor-hover); flex:none; }
 .media-audio { display:flex; align-items:center; justify-content:center; font-size:18px; color:var(--editor-accent); }
 .media-delete { border:0!important; background:transparent!important; color:var(--editor-muted)!important; font-size:18px; padding:4px 8px!important; }.media-delete:hover { color:var(--editor-accent)!important; }

@@ -1,7 +1,8 @@
 const rotate=(v,degrees)=>{const a=degrees*Math.PI/180;return {x:v.x*Math.cos(a)-v.y*Math.sin(a),y:v.x*Math.sin(a)+v.y*Math.cos(a)}}
 const wrap=angle=>((angle+180)%360+360)%360-180
 export function beginCanvasTransform(pose,point,corner){
-  const local={x:corner.includes('e') ? 160 : -160,y:corner.includes('s') ? 255 : -255}
+  const w=(pose.width ?? 320)/2,h=(pose.height ?? 510)/2
+  const local={x:corner.includes('e') ? w : -w,y:corner.includes('s') ? h : -h}
   const vector=rotate(local,pose.rotation)
   return {pose:{...pose},point:{...point},vector,anchor:{x:pose.x-vector.x*pose.scale,y:pose.y-vector.y*pose.scale}}
 }

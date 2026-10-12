@@ -28,9 +28,9 @@ test('v3 旧工程读取后补齐新字段', () => {
   assert.deepEqual(p.assets, {})
 })
 
-test('v4 的图片/背景/音频/素材集合在 M1 读取时置空，逐项解析留待 M2/M4', () => {
-  const p = readProject({ version: 4, clips: [], imageClips: [{ id: 'x' }], backgroundClips: [{ id: 'y' }], audioClips: [{ id: 'z' }], assets: { a: 1 } }, models)
-  assert.deepEqual(p.imageClips, [])
+test('v4 读取图片引用，背景/音频/打包素材的解析留待后续阶段', () => {
+  const p = readProject({ version: 4, clips: [], imageClips: [{ assetId: 'x' }], backgroundClips: [{ id: 'y' }], audioClips: [{ id: 'z' }], assets: { a: 1 } }, models)
+  assert.equal(p.imageClips[0].assetId, 'x')
   assert.deepEqual(p.backgroundClips, [])
   assert.deepEqual(p.audioClips, [])
   assert.deepEqual(p.assets, {})

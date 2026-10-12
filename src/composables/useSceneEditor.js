@@ -1,3 +1,4 @@
+import { visualClips, createImageClip, appendVisualClips, visualClipLimit } from '../mediaTracks.js'
 import {sampleTimelinePose} from '../timelinePose.js'
 import {applyCanvasSelection} from '../canvasSelection.js'
 import {sceneParameterOverrides} from '../sceneParameterPriority.js'
@@ -16,10 +17,12 @@ import { sceneMouseParams } from '../sceneMouseTracking.js'
 import { moveClipKey, editKeyRefs } from '../timelineKeyframes.js'
 import { changeProjectFps } from '../sceneFrameRate.js'
 import { createEditHistory } from '../editHistory.js'
-import { createProject, createClip, readProject, clipVisible, localFrame, sampleClip, setClipKeyframe, removeClipKeyframe, splitClip, uid } from '../sceneProject.js'
+import { createProject, createClip, readProject, clipVisible, localFrame, sampleClip, setClipKeyframe, removeClipKeyframe, uid } from '../sceneProject.js'
 
 export function useSceneEditor() {
   const project = reactive(createProject()), runtimes = shallowReactive({}), previewOverrides = reactive({})
+  const allClips = computed(()=>visualClips(project))
+  const imageLoading = ref(false), missingImages = ref([])
   const canvasSelection=ref([])
   const selectedId = ref(''), frame = ref(0), playing = ref(false), message = ref('')
   const loopPlayback=ref(false)
@@ -32,11 +35,11 @@ export function useSceneEditor() {
   const sceneCanvas = ref(null), projectInput = ref(null), backgroundInput = ref(null), backgroundLoading = ref(false), uploadingBackground = ref(false), recorder = useRecorder()
   const locked = computed(()=>playing.value || recorder.isRecording.value)
   const time = computed(()=>frame.value/project.fps)
-  const selected = computed(()=>project.clips.find(c=>c.id===selectedId.value))
+  const selected = computed(()=>allClips.value.find(c=>c.id===selectedId.value))
   const editLocked = computed(()=>locked.value || !!selected.value?.layerLocked)
   const runtime = computed(()=>runtimes[selectedId.value])
   const previewMotionInfo=computed(()=>runtime.value?.info[previewMotionName.value])
-  const loading = computed(()=>backgroundLoading.value || uploadingBackground.value || project.clips.some(c=>!runtimes[c.id]))
+  const loading = computed(()=>backgroundLoading.value || uploadingBackground.value || imageLoading.value || project.clips.some(c=>!runtimes[c.id]))
   const canSplit = computed(()=>selected.value && time.value>selected.value.start && time.value<selected.value.start+selected.value.duration)
   function sampleState(clip) {
     const state = sampleClip(clip,time.value,project.fps,runtimes[clip.id]?.groups || [])
@@ -59,8 +62,8 @@ export function useSceneEditor() {
       clearLivePreview()
       Object.assign(project,snapshot(state.project));clearPreviewOverrides()
       Object.assign(previewOverrides,snapshot(state.overrides))
-      canvasSelection.value=(state.canvasSelection || [state.selectedId]).filter(id=>project.clips.some(c=>c.id===id))
-      selectedId.value=project.clips.some(c=>c.id===state.selectedId) ? state.selectedId : project.clips[0]?.id || ''
+      canvasSelection.value=(state.canvasSelection || [state.selectedId]).filter(id=>allClips.value.some(c=>c.id===id))
+      selectedId.value=allClips.value.some(c=>c.id===state.selectedId) ? state.selectedId : allClips.value[0]?.id || ''
       frame.value=Math.min(state.frame,Math.round(project.duration*project.fps));drive()
     },
     changed: () => historyRevision.value++,
@@ -80,8 +83,8 @@ export function useSceneEditor() {
     if(fn===batchCanvasTransform)ids=args[0].map(e=>e.id)
     if(fn===batchKeys)ids=(args[1]?.type==='paste' ? args[1].entries : args[0]).map(item=>item.clipId)
     if(fn===batchClips && args[0].type!=='paste')ids=args[0].type==='move' ? args[0].entries.map(e=>e.id) : args[0].ids
-    if([renameLayer,reorderLayer].includes(fn))ids=project.clips.filter(c=>c.track===args[0]).map(c=>c.id)
-    if(!canEditClips(project.clips,ids)){message.value='图层已锁定，请先解锁后编辑';return}
+    if([renameLayer,reorderLayer].includes(fn))ids=allClips.value.filter(c=>c.track===args[0]).map(c=>c.id)
+    if(!canEditClips(allClips.value,ids)){message.value='图层已锁定，请先解锁后编辑';return}
     if(fn===resetPlacement || fn===changeLayerState || fn===renameLayer || fn===reorderLayer || (fn===batchClips && args[0].type!=='move') || (fn===batchKeys && args[1].type!=='move'))history.end()
     clearLivePreview()
     return history.edit(()=>fn(...args),merge ? fn.name+':'+selectedId.value+':'+frame.value+':'+(args[0]?.key ?? args[0]) : undefined)
@@ -185,45 +188,50 @@ export function useSceneEditor() {
   function addModel(model) {
     if(locked.value)return
     if(project.clips.length>=16){message.value='单个工程最多 16 个模型片段';return}
-    const used=new Set(project.clips.map(c=>c.track))
-    const track=Array.from({length:16},(_,i)=>i).find(i=>!used.has(i))
-    if(track===undefined){message.value='没有空闲轨道';return}
     const start=Math.min(time.value,project.duration-1/project.fps)
-    const clip=createClip(model,start,Math.min(5,project.duration-start),insertFrontLayer(project.clips))
-    clip.transform.x=project.clips.length%2 ? 190 : -190
+    const clip=createClip(model,start,Math.min(5,project.duration-start),insertFrontLayer(allClips.value))
+    clip.transform.x=allClips.value.length%2 ? 190 : -190
     project.clips.push(clip);selectCanvas([clip.id],clip.id)
   }
-  function renameLayer(track,value){const name=String(value).trim().slice(0,100);if(!name)return;for(const clip of project.clips.filter(c=>c.track===track))clip.layerName=name}
-  function changeLayerState(track,patch){setLayerState(project.clips,track,patch);drive()}
-  function reorderLayer(from,to){reorderSceneLayer(project.clips,from,to)}
+  function addImage(asset) {
+    if(asset.kind!=='image' || !asset.width || !asset.height){message.value='图片无法解码，请重新导入有效图片';return}
+    if(project.imageClips.length>=64){message.value='单个工程最多 64 个图片片段';return}
+    const start=Math.min(time.value,project.duration-1/project.fps)
+    const clip=createImageClip(asset,start,Math.min(5,project.duration-start),insertFrontLayer(allClips.value))
+    project.imageClips.push(clip);selectCanvas([clip.id],clip.id)
+  }
+  function imageStatus(status){imageLoading.value=status.loading;missingImages.value=status.missing}
+  function renameLayer(track,value){const name=String(value).trim().slice(0,100);if(!name)return;for(const clip of allClips.value.filter(c=>c.track===track))clip.layerName=name}
+  function changeLayerState(track,patch){setLayerState(allClips.value,track,patch);drive()}
+  function reorderLayer(from,to){reorderSceneLayer(allClips.value,from,to)}
   function batchClips(action){
-    if(action.type==='move'){if(!applyClipStarts(project.clips,action.entries,project.duration,project.fps))message.value='整组移动不能越界或与同轨道片段重叠'}
-    else if(action.type==='delete'){const ids=new Set(action.ids);project.clips=project.clips.filter(c=>!ids.has(c.id));canvasSelection.value=canvasSelection.value.filter(id=>!ids.has(id));if(ids.has(selectedId.value))selectedId.value=canvasSelection.value.at(-1) || ''}
+    if(action.type==='move'){if(!applyClipStarts(allClips.value,action.entries,project.duration,project.fps))message.value='整组移动不能越界或与同轨道片段重叠'}
+    else if(action.type==='delete'){const ids=new Set(action.ids);project.clips=project.clips.filter(c=>!ids.has(c.id));project.imageClips=project.imageClips.filter(c=>!ids.has(c.id));canvasSelection.value=canvasSelection.value.filter(id=>!ids.has(id));if(ids.has(selectedId.value))selectedId.value=canvasSelection.value.at(-1) || ''}
     else if(action.type==='split'){
-      const plan=planClipSplit(project.clips,action.ids,time.value)
+      const plan=planClipSplit(allClips.value,action.ids,time.value)
       if(plan.error){message.value=plan.error;return}
-      for(const left of plan.left)project.clips.find(c=>c.id===left.id).duration=left.duration
-      project.clips.push(...plan.right);selectCanvas(plan.right.map(c=>c.id),plan.right[0].id)
+      for(const left of plan.left)allClips.value.find(c=>c.id===left.id).duration=left.duration
+      appendVisualClips(project,plan.right);selectCanvas(plan.right.map(c=>c.id),plan.right[0].id)
     }
     else if(action.type==='paste'){
-      const plan=planClipPaste(project.clips,action.clipboard,time.value,project.duration,project.fps)
+      const plan=planClipPaste(allClips.value,action.clipboard,time.value,project.duration,project.fps)
       if(plan.error){message.value=plan.error;return}
-      for(const c of project.clips)c.track=plan.tracks.find(t=>t.track===c.track).to
-      project.clips.push(...plan.clips);selectCanvas(plan.clips.map(c=>c.id),plan.clips[0].id)
+      for(const c of allClips.value)c.track=plan.tracks.find(t=>t.track===c.track).to
+      appendVisualClips(project,plan.clips);selectCanvas(plan.clips.map(c=>c.id),plan.clips[0].id)
     }
   }
   function editClip(id,patch) {
     if(locked.value)return
-    const clip=project.clips.find(c=>c.id===id);if(!clip)return
+    const clip=allClips.value.find(c=>c.id===id);if(!clip)return
     const merged={...clip,...patch},min=1/project.fps
     if(![merged.start,merged.duration,merged.offset,merged.track].every(Number.isFinite))return
     merged.start=Math.round(Math.max(0,Math.min(project.duration-min,merged.start))*project.fps)/project.fps
     merged.duration=Math.max(min,Math.min(project.duration-merged.start,merged.duration))
-    merged.offset=Math.max(0,merged.offset);merged.track=Math.round(Math.max(0,Math.min(15,merged.track)))
-    if(project.clips.some(c=>c.id!==id && c.track===merged.track && merged.start<c.start+c.duration && merged.start+merged.duration>c.start)) {
-      message.value='同一轨道的片段不能重叠；同屏模型请放在不同轨道';return
+    merged.offset=Math.max(0,merged.offset);merged.track=Math.round(Math.max(0,Math.min(79,merged.track)))
+    if(allClips.value.some(c=>c.id!==id && c.track===merged.track && merged.start<c.start+c.duration && merged.start+merged.duration>c.start)) {
+      message.value='同一轨道的片段不能重叠；同屏素材请放在不同轨道';return
     }
-    if(merged.track!==clip.track){const target=project.clips.find(c=>c.id!==id && c.track===merged.track);if(target?.layerLocked){message.value='目标图层已锁定';return}if(target){clip.layerName=target.layerName || target.name;clip.layerLocked=!!target.layerLocked;clip.layerHidden=!!target.layerHidden}}
+    if(merged.track!==clip.track){const target=allClips.value.find(c=>c.id!==id && c.track===merged.track);if(target?.layerLocked){message.value='目标图层已锁定';return}if(target){clip.layerName=target.layerName || target.name;clip.layerLocked=!!target.layerLocked;clip.layerHidden=!!target.layerHidden}}
     Object.assign(clip,{start:merged.start,duration:merged.duration,offset:merged.offset,track:merged.track})
   }
   const editTiming = (key,value) => editClip(selectedId.value,{[key]:Number(value)})
@@ -237,9 +245,9 @@ export function useSceneEditor() {
   }
   function resetPlacement(){if(selected.value && clipVisible(selected.value,time.value))resetCanvasPlacement(selected.value,selectedFrame())}
   function selectCanvas(ids,primary){sceneTimeline.value?.clearDetails();selectTimeline(ids);selectedId.value=canvasSelection.value.includes(primary) ? primary : canvasSelection.value.at(-1) || ''}
-  function selectTimeline(ids){canvasSelection.value=[...new Set(ids)].filter(id=>project.clips.some(c=>c.id===id));if(canvasSelection.value.length && !canvasSelection.value.includes(selectedId.value))selectedId.value=canvasSelection.value.at(-1)}
-  function batchCanvasTransform(entries){applyCanvasSelection(project.clips,entries,time.value,project.fps,autoTransform.value)}
-  watch(()=>project.clips.map(c=>c.id),()=>{canvasSelection.value=canvasSelection.value.filter(id=>project.clips.some(c=>c.id===id))})
+  function selectTimeline(ids){canvasSelection.value=[...new Set(ids)].filter(id=>allClips.value.some(c=>c.id===id));if(canvasSelection.value.length && !canvasSelection.value.includes(selectedId.value))selectedId.value=canvasSelection.value.at(-1)}
+  function batchCanvasTransform(entries){applyCanvasSelection(allClips.value,entries,time.value,project.fps,autoTransform.value)}
+  watch(()=>allClips.value.map(c=>c.id),()=>{canvasSelection.value=canvasSelection.value.filter(id=>allClips.value.some(c=>c.id===id))})
   function moveModel(id,position) {selectedId.value=id;editTransform('x',position.x);editTransform('y',position.y)}
   function transformModel(id,patch){selectedId.value=id;for(const [key,value] of Object.entries(patch))editTransform(key,value)}
   function editParam(p,value) {
@@ -267,7 +275,7 @@ export function useSceneEditor() {
       if(!field || items.length!==1)return
       action={...action,value:Math.max(field.min,Math.min(field.max,action.value))}
     }
-    editKeyRefs(project.clips,items,action,project.fps)
+    editKeyRefs(allClips.value,items,action,project.fps)
   }
   function editKeyValue(key,value) {
     if(locked.value || !selected.value || !clipVisible(selected.value,time.value))return
@@ -280,21 +288,16 @@ export function useSceneEditor() {
   function removeEvent(event) {const clip=selected.value;if(clip)clip.events=clip.events.filter(e=>e.id!==event.id)}
   function duplicate() {
     if(!selected.value || locked.value)return
-    if(project.clips.length>=16){message.value='单个工程最多 16 个模型片段';return}
+    const error=visualClipLimit([...allClips.value,selected.value]);if(error){message.value=error;return}
     const clip=snapshot(selected.value);clip.id=uid();clip.name+=' · 副本'
-    clip.track=insertFrontLayer(project.clips)
+    clip.track=insertFrontLayer(allClips.value)
     clip.transform.x=Math.min(1920,clip.transform.x+80)
-    project.clips.push(clip);selectedId.value=clip.id
+    appendVisualClips(project,[clip]);selectCanvas([clip.id],clip.id)
   }
-  function split() {
-    if(!canSplit.value || locked.value || project.clips.length>=16)return
-    const clip=selected.value,right=splitClip(snapshot(clip),time.value)
-    if(!right)return
-    clip.duration=time.value-clip.start;project.clips.push(right);selectCanvas([right.id],right.id)
-  }
-  function deleteSelected() {if(editLocked.value)return;const i=project.clips.findIndex(c=>c.id===selectedId.value);if(i>=0)project.clips.splice(i,1);selectedId.value=''}
+  function split() {if(canSplit.value && !locked.value)batchClips({type:'split',ids:[selectedId.value]})}
+  function deleteSelected() {if(!editLocked.value)batchClips({type:'delete',ids:[selectedId.value]})}
   function runtimeReady(id,data) {
-    const clip=project.clips.find(c=>c.id===id);if(!clip)return
+    const clip=allClips.value.find(c=>c.id===id);if(!clip)return
     for(const key of Object.keys(clip.keyframes)) {
       if(key.startsWith('@'))continue
       const target=resolveParamId(key,data.groups)
@@ -383,7 +386,7 @@ export function useSceneEditor() {
   function stop(){pause();seek(0)}
   function changeDuration(value) {
     const n=Number(value);if(locked.value || !Number.isFinite(n))return
-    project.duration=Math.min(600,Math.max(.5,n,...project.clips.map(c=>c.start+c.duration)));seek(Math.min(time.value,project.duration))
+    project.duration=Math.min(600,Math.max(.5,n,...allClips.value.map(c=>c.start+c.duration)));seek(Math.min(time.value,project.duration))
   }
   function changeFps(value) {
     if(locked.value)return
@@ -393,22 +396,30 @@ export function useSceneEditor() {
   function record() {
     if(recorder.isRecording.value){pause();recorder.stop();return}
     if(loading.value)return
+    if(missingImages.value.length)message.value='以下图片素材缺失，录制将跳过：'+missingImages.value.map(c=>c.name).join('、')
     stop();if(recorder.start(sceneCanvas.value.getCanvas(),null,'canvas',null,null,project.fps))play();else message.value='无法开始录制'
   }
   function exportProject() {
+    message.value=missingImages.value.length ? '工程已导出，但以下图片素材缺失：'+missingImages.value.map(c=>c.name).join('、') : '工程已导出；图片引用本浏览器素材库，尚不包含图片文件'
     const url=URL.createObjectURL(new Blob([JSON.stringify(project,null,2)],{type:'application/json'}))
     const a=document.createElement('a');a.href=url;a.download='tomori-v0.1-'+Date.now()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)
   }
-  function replaceProject(data) {const parsed=readProject(data,models);backgroundRequest++;uploadingBackground.value=false;pause();clearPreviewOverrides();Object.assign(project,parsed);selectCanvas(project.clips[0] ? [project.clips[0].id] : [],project.clips[0]?.id);frame.value=0}
+  function replaceProject(data) {const parsed=readProject(data,models);backgroundRequest++;uploadingBackground.value=false;pause();clearPreviewOverrides();Object.assign(project,parsed);selectCanvas(allClips.value[0] ? [allClips.value[0].id] : [],allClips.value[0]?.id);frame.value=0}
   async function importProject(event) {
     const file=event.target.files?.[0];event.target.value='';if(!file || locked.value)return
     try{const data=JSON.parse(await file.text());if(locked.value)return;history.end();history.edit(()=>replaceProject(data));message.value='已导入场景工程'}catch(e){message.value='导入失败：'+e.message}
   }
   let saveTimer=null,initialized=false
-  watch(project,()=>{drive();if(!initialized)return;clearTimeout(saveTimer);saveTimer=setTimeout(()=>{try{localStorage.setItem('tomori-scene-v2',JSON.stringify(project))}catch{message.value='本地保存失败，请导出工程备份'}},400)},{deep:true})
+  function saveProject(){
+    if(!initialized)return
+    clearTimeout(saveTimer)
+    try{localStorage.setItem('tomori-scene-v2',JSON.stringify(project))}catch{message.value='本地保存失败，请导出工程备份'}
+  }
+  watch(project,()=>{drive();if(!initialized)return;clearTimeout(saveTimer);saveTimer=setTimeout(saveProject,400)},{deep:true})
   watch(selectedId,()=>{clearLivePreview();previewMotionName.value='';previewExpressionName.value='';paramSearch.value='';allParams.value=false;drive()})
   onMounted(()=>{
     window.addEventListener('keydown',shortcut)
+    window.addEventListener('pagehide',saveProject)
     try{
       const saved=localStorage.getItem('tomori-scene-v2')
       if(saved)replaceProject(JSON.parse(saved))
@@ -416,6 +427,6 @@ export function useSceneEditor() {
     }catch(e){message.value='恢复工程失败：'+e.message}
     initialized=true
   })
-  onBeforeUnmount(()=>{window.removeEventListener('keydown',shortcut);pause();clearInterval(previewTimer);clearTimeout(saveTimer);try{localStorage.setItem('tomori-scene-v2',JSON.stringify(project))}catch{};recorder.destroy()})
-  return {sceneTimeline,selectTimeline,changeAspectRatio:editable(changeAspectRatio),canvasSelection,selectCanvas,batchCanvasTransform:editable(batchCanvasTransform),batchClips:editable(batchClips),editLocked,changeLayerState:editable(changeLayerState),project,runtimes,selectedId,playing,loopPlayback,message,paramSearch,allParams,autoTransform,sceneCanvas,projectInput,recorder,locked,time,selected,runtime,loading,canSplit,selectedPose,paramLabels,assetModels:models,visibleParams,transformFields,hasKey,previewMotionName,previewExpressionName,activePreview,previewMotionInfo,previewProgress,preview,resetPreview,endPreview,mouseMoved,changeMouseTrack:editable(changeMouseTrack),addChosenEvent:editable(addChosenEvent),canUndo,canRedo,undo,redo,beginEdit,endEdit,renameClip:editable(renameClip,true),changeBackground:editable(changeBackground,true),backgroundInput,backgroundLoading,uploadingBackground,uploadBackground,removeBackgroundImage:editable(removeBackgroundImage),resetBackground:editable(resetBackground),addModel:editable(addModel),renameLayer:editable(renameLayer),reorderLayer:editable(reorderLayer),editClip:editable(editClip,true),editTiming:editable(editTiming,true),editTransform:editable(editTransform,true),resetPlacement:editable(resetPlacement),moveModel:editable(moveModel),transformModel:editable(transformModel),editParam:editable(editParam,true),resetParam:editable(resetParam),toggleKey:editable(toggleKey),removeKey:editable(removeKey),moveKey:editable(moveKey),batchKeys:editable(batchKeys),editKeyValue:editable(editKeyValue,true),editEvent:editable(editEvent),pasteEvent:editable(pasteEvent),removeEvent:editable(removeEvent),duplicate:editable(duplicate),split:editable(split),deleteSelected:editable(deleteSelected),runtimeReady,disposeRuntime,runtimeError,addEvent:editable(addEvent),play,pause,seek,stop,changeDuration:editable(changeDuration,true),changeFps:editable(changeFps),record,exportProject,importProject}
+  onBeforeUnmount(()=>{window.removeEventListener('keydown',shortcut);window.removeEventListener('pagehide',saveProject);pause();clearInterval(previewTimer);saveProject();recorder.destroy()})
+  return {allClips,imageStatus,missingImages,addImage:editable(addImage),sceneTimeline,selectTimeline,changeAspectRatio:editable(changeAspectRatio),canvasSelection,selectCanvas,batchCanvasTransform:editable(batchCanvasTransform),batchClips:editable(batchClips),editLocked,changeLayerState:editable(changeLayerState),project,runtimes,selectedId,playing,loopPlayback,message,paramSearch,allParams,autoTransform,sceneCanvas,projectInput,recorder,locked,time,selected,runtime,loading,canSplit,selectedPose,paramLabels,assetModels:models,visibleParams,transformFields,hasKey,previewMotionName,previewExpressionName,activePreview,previewMotionInfo,previewProgress,preview,resetPreview,endPreview,mouseMoved,changeMouseTrack:editable(changeMouseTrack),addChosenEvent:editable(addChosenEvent),canUndo,canRedo,undo,redo,beginEdit,endEdit,renameClip:editable(renameClip,true),changeBackground:editable(changeBackground,true),backgroundInput,backgroundLoading,uploadingBackground,uploadBackground,removeBackgroundImage:editable(removeBackgroundImage),resetBackground:editable(resetBackground),addModel:editable(addModel),renameLayer:editable(renameLayer),reorderLayer:editable(reorderLayer),editClip:editable(editClip,true),editTiming:editable(editTiming,true),editTransform:editable(editTransform,true),resetPlacement:editable(resetPlacement),moveModel:editable(moveModel),transformModel:editable(transformModel),editParam:editable(editParam,true),resetParam:editable(resetParam),toggleKey:editable(toggleKey),removeKey:editable(removeKey),moveKey:editable(moveKey),batchKeys:editable(batchKeys),editKeyValue:editable(editKeyValue,true),editEvent:editable(editEvent),pasteEvent:editable(pasteEvent),removeEvent:editable(removeEvent),duplicate:editable(duplicate),split:editable(split),deleteSelected:editable(deleteSelected),runtimeReady,disposeRuntime,runtimeError,addEvent:editable(addEvent),play,pause,seek,stop,changeDuration:editable(changeDuration,true),changeFps:editable(changeFps),record,exportProject,importProject}
 }

@@ -1,7 +1,7 @@
 <template>
   <div class="scene-preview">
-    <div v-if="selectionEntries.length>1 && !recording" class="selection-tools" role="group" aria-label="多人对齐与分布">
-      <span>已选 {{ selectionEntries.length }} 人</span>
+    <div v-if="selectionEntries.length>1 && !recording" class="selection-tools" role="group" aria-label="图层对齐与分布">
+      <span>已选 {{ selectionEntries.length }} 个图层</span>
       <button v-for="tool in layoutTools" :key="tool.key" :disabled="playing || !layoutSelection(selectionEntries,tool.key).length" :title="tool.title" @click="applyLayout(tool.key)">{{ tool.label }}</button>
     </div>
     <div class="preview-tools" role="group" aria-label="画布缩放"><span>画布</span><small aria-hidden="true">10%</small><input type="range" aria-label="画布缩放比例" min="10" max="200" step="1" :value="displayZoom" :aria-valuetext="displayZoom+'%'" @input="changePreviewZoom($event.target.value)" /><small aria-hidden="true">200%</small><output aria-live="off">{{displayZoom}}%</output><button :aria-pressed="previewFit==='manual' && manualZoom===100" title="按工程尺寸显示：100%" @click="changePreviewZoom(100)">100%</button><button :aria-pressed="previewFit==='width'" title="按预览区宽度显示，超出高度时上下滚动" @click="fitPreview('width')">适应宽度</button><button :aria-pressed="previewFit==='contain'" title="保持比例并完整显示画面" @click="fitPreview('contain')">完整画面</button></div>
@@ -9,18 +9,21 @@
     <div class="scene-stage" ref="stage" tabindex="0" aria-label="画布编辑区域" @keydown="nudgeKey" @focusout="endNudge" :style="{ width: stageWidth + 'px', height:stageWidth*size.height/size.width+'px',transform:'translate('+viewPan.x+'px,'+viewPan.y+'px)' }" @pointermove="pointerMove" @pointerup="pointerUp" @pointercancel="pointerUp" @lostpointercapture="pointerUp">
       <canvas ref="canvas" :width="size.width" :height="size.height" aria-label="场景合成画布" @pointerdown="pointerDown"></canvas>
       <div v-if="selectionEntries.length>1" v-for="entry in selectionEntries" :key="entry.id" class="selection-outline member-outline" :style="poseBox(entry.pose)" aria-hidden="true"></div>
-      <div v-if="selectedBox" class="selection-outline" :style="selectedBox" :aria-label="'已选 '+selectionEntries.length+' 个人物'"><span>{{ selectionEntries.length>1 ? '已选 '+selectionEntries.length+' 个人物' : selected?.name }}</span><template v-if="!playing"><button v-for="corner in ['nw','ne','sw','se']" :key="corner" class="transform-handle scale-handle" :class="corner" :aria-label="'缩放模型 '+corner" :title="selectionEntries.length>1 ? '围绕选区中心整体缩放' : '拖动等比缩放，对角固定'" @pointerdown.stop.prevent="beginTransform($event,'scale',corner)"></button><i class="rotation-stem" aria-hidden="true"></i><button class="transform-handle rotate-handle" aria-label="旋转模型" title="拖动旋转；按住 Shift 吸附到 15°" @pointerdown.stop.prevent="beginTransform($event,'rotate')">↻</button></template></div>
+      <div v-if="selectedBox" class="selection-outline" :style="selectedBox" :aria-label="'已选 '+selectionEntries.length+' 个图层'"><span>{{ selectionEntries.length>1 ? '已选 '+selectionEntries.length+' 个图层' : selected?.name }}</span><template v-if="!playing"><button v-for="corner in ['nw','ne','sw','se']" :key="corner" class="transform-handle scale-handle" :class="corner" :aria-label="'缩放图层 '+corner" :title="selectionEntries.length>1 ? '围绕选区中心整体缩放' : '拖动等比缩放，对角固定'" @pointerdown.stop.prevent="beginTransform($event,'scale',corner)"></button><i class="rotation-stem" aria-hidden="true"></i><button class="transform-handle rotate-handle" aria-label="旋转图层" title="拖动旋转；按住 Shift 吸附到 15°" @pointerdown.stop.prevent="beginTransform($event,'rotate')">↻</button></template></div>
       <div v-if="marquee" class="canvas-marquee" :style="marquee" aria-hidden="true"></div>
       <div v-for="guide in guides" :key="guide.axis" class="canvas-guide" :class="guide.axis" :style="guide.axis==='x' ? {left:(guide.value+size.width/2)/size.width*100+'%'} : {top:(guide.value+size.height/2)/size.height*100+'%'}" aria-hidden="true"></div>
-      <div v-if="!clips.length" class="empty-scene">从左侧素材库添加模型到场景</div>
+      <div v-if="!clips.length" class="empty-scene">从左侧素材库添加模型或图片到场景</div>
     </div>
     </div>
-    <ClipRenderer v-for="clip in clips" :key="clip.id" :clip="clip" @ready="ready" @error="(id, message) => emit('error', id, message)" @dispose="dispose" />
+    <ClipRenderer v-for="clip in clips.filter(c=>!isImageClip(c))" :key="clip.id" :clip="clip" @ready="ready" @error="(id, message) => emit('error', id, message)" @dispose="dispose" />
   </div>
 </template>
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import ClipRenderer from './ClipRenderer.vue'
+import { isImageClip, visualPose, imageDimensions } from '../mediaTracks.js'
+import { createImageSources } from '../imageSources.js'
+import { assetStore } from '../assetStore.js'
 import {sceneDrawOrder,sceneHitOrder} from '../sceneLayers.js'
 import { clipVisible, sampleClip, sceneSize } from '../sceneProject.js'
 import { beginCanvasTransform,scaleCanvasTransform,rotateCanvasTransform } from '../canvasTransform.js'
@@ -28,7 +31,12 @@ import { snapCanvasPosition,nudgeCanvasPosition } from '../canvasPosition.js'
 import {selectionBounds,boxSelected,moveSelection,scaleSelection,rotateSelection,layoutSelection} from '../canvasSelection.js'
 import {isPanButton,panOffset} from '../canvasPan.js'
 const props = defineProps({ clips: Array, time: Number, fps: Number, aspectRatio:String, selected: Object, selectedIds:Array, runtimes: Object, playing: Boolean, background: String, backgroundImage: String, recording: Boolean })
-const emit = defineEmits(['ready', 'dispose', 'error', 'select', 'move', 'transform', 'batch-transform', 'begin-edit', 'end-edit', 'background-ready', 'mouse-position'])
+const emit = defineEmits(['ready', 'dispose', 'error', 'select', 'move', 'transform', 'batch-transform', 'begin-edit', 'end-edit', 'background-ready', 'mouse-position', 'image-status'])
+const images=createImageSources({blob:id=>assetStore.blob(id),changed:()=>{
+  const clips=props.clips.filter(isImageClip)
+  emit('image-status',{loading:clips.some(c=>images.status(c.assetId)==='loading'),missing:clips.filter(c=>images.status(c.assetId)==='missing')})
+}})
+watch(()=>props.clips.filter(isImageClip).map(c=>c.assetId),ids=>images.sync(ids),{immediate:true,flush:'sync'})
 const size=computed(()=>sceneSize(props.aspectRatio))
 const previewFit=ref('width')
 const manualZoom=ref(100)
@@ -71,13 +79,13 @@ watch(()=>props.backgroundImage,src=>{
 },{immediate:true})
 function ready(id, runtime) { emit('ready', id, runtime) }
 function dispose(id) { emit('dispose', id) }
-function pose(clip) { return sampleClip(clip, props.time, props.fps, props.runtimes[clip.id]?.groups || []).transform }
+function pose(clip) { return visualPose(clip, sampleClip(clip, props.time, props.fps, props.runtimes[clip.id]?.groups || []).transform) }
 const editableClips=computed(()=>props.clips.filter(c=>!c.layerLocked && clipVisible(c,props.time)))
 const selectionEntries=computed(()=>editableClips.value.filter(c=>(props.selectedIds || [props.selected?.id]).includes(c.id)).map(c=>({id:c.id,pose:pose(c)})))
 function poseBox(t){
   return {
-    left: ((size.value.width/2 + t.x - 160 * t.scale) / size.value.width * 100) + '%', top: ((size.value.height/2 + t.y - 255 * t.scale) / size.value.height * 100) + '%',
-    width: (320 * t.scale / size.value.width * 100) + '%', height: (510 * t.scale / size.value.height * 100) + '%',
+    left: ((size.value.width/2 + t.x - (t.width ?? 320)/2 * t.scale) / size.value.width * 100) + '%', top: ((size.value.height/2 + t.y - (t.height ?? 510)/2 * t.scale) / size.value.height * 100) + '%',
+    width: ((t.width ?? 320) * t.scale / size.value.width * 100) + '%', height: ((t.height ?? 510) * t.scale / size.value.height * 100) + '%',
     transform: 'rotate(' + t.rotation + 'deg)',
   }
 }
@@ -88,15 +96,15 @@ const selectedBox=computed(()=>{
   return {left:(b.left+size.value.width/2)/size.value.width*100+'%',top:(b.top+size.value.height/2)/size.value.height*100+'%',width:b.width/size.value.width*100+'%',height:b.height/size.value.height*100+'%'}
 })
 const layoutTools=[
-  {key:'left',label:'左对齐',title:'按人物旋转后的外框左边缘对齐'},
-  {key:'centerX',label:'水平居中',title:'人物中心对齐到选区水平中心'},
-  {key:'right',label:'右对齐',title:'按人物旋转后的外框右边缘对齐'},
-  {key:'top',label:'顶部对齐',title:'按人物旋转后的外框顶部对齐'},
-  {key:'centerY',label:'垂直居中',title:'人物中心对齐到选区垂直中心'},
-  {key:'bottom',label:'底部对齐',title:'按人物旋转后的外框底部对齐'},
-  {key:'distributeX',label:'水平等距',title:'至少选择三人；固定左右两端，外框间距相等'},
-  {key:'distributeY',label:'垂直等距',title:'至少选择三人；固定上下两端，外框间距相等'},
-  {key:'centerCanvas',label:'整组居中',title:'将选区中心移至画布中心，保持人物间距'},
+  {key:'left',label:'左对齐',title:'按图层旋转后的外框左边缘对齐'},
+  {key:'centerX',label:'水平居中',title:'图层中心对齐到选区水平中心'},
+  {key:'right',label:'右对齐',title:'按图层旋转后的外框右边缘对齐'},
+  {key:'top',label:'顶部对齐',title:'按图层旋转后的外框顶部对齐'},
+  {key:'centerY',label:'垂直居中',title:'图层中心对齐到选区垂直中心'},
+  {key:'bottom',label:'底部对齐',title:'按图层旋转后的外框底部对齐'},
+  {key:'distributeX',label:'水平等距',title:'至少选择三个图层；固定左右两端，外框间距相等'},
+  {key:'distributeY',label:'垂直等距',title:'至少选择三个图层；固定上下两端，外框间距相等'},
+  {key:'centerCanvas',label:'整组居中',title:'将选区中心移至画布中心，保持图层间距'},
 ]
 function applyLayout(operation){
   if(props.playing || props.recording || drag)return
@@ -122,7 +130,7 @@ function pointerDown(e) {
   const hit = sorted.find(c => {
     const t = pose(c), r = -t.rotation * Math.PI / 180
     const x = p.x - t.x, y = p.y - t.y
-    return Math.abs(x * Math.cos(r) - y * Math.sin(r)) <= 160 * t.scale && Math.abs(x * Math.sin(r) + y * Math.cos(r)) <= 255 * t.scale
+    return Math.abs(x * Math.cos(r) - y * Math.sin(r)) <= (t.width ?? 320)/2 * t.scale && Math.abs(x * Math.sin(r) + y * Math.cos(r)) <= (t.height ?? 510)/2 * t.scale
   })
   const current=selectionEntries.value.map(e=>e.id)
   if (!hit){drag={mode:'box',point:p,last:p,base:e.shiftKey ? current : []};stage.value.setPointerCapture(e.pointerId);return}
@@ -192,7 +200,7 @@ function nudgeKey(e){
 }
 function nudgeUp(e){if(!nudgeKeys.has(e.key))return;nudgeKeys.delete(e.key);if(!nudgeKeys.size)emit('end-edit')}
 watch(()=>selectionEntries.value.map(e=>e.id).join(',')+'|'+props.playing+'|'+props.recording,()=>{endNudge();if(drag && (props.playing || props.recording || (drag.mode!=='box' && drag.entries.some(e=>!selectionEntries.value.some(entry=>entry.id===e.id)))))pointerUp({type:'pointercancel'})})
-function draw() {
+function paint() {
   const ctx = canvas.value?.getContext('2d')
   if (ctx) {
     ctx.clearRect(0, 0, size.value.width, size.value.height)
@@ -201,6 +209,17 @@ function draw() {
     if(backgroundImage)ctx.drawImage(backgroundImage,0,0,size.value.width,size.value.height)
     for (const clip of sceneDrawOrder(props.clips)) {
       if (!clipVisible(clip, props.time)) continue
+      if(isImageClip(clip)) {
+        const source=images.get(clip.assetId)
+        if(source){
+          const t=pose(clip),dimensions=imageDimensions(clip)
+          ctx.save();ctx.translate(size.value.width/2+t.x,size.value.height/2+t.y)
+          ctx.rotate(t.rotation*Math.PI/180);ctx.scale(t.scale,t.scale)
+          ctx.globalAlpha=Math.max(0,Math.min(1,t.opacity))
+          ctx.drawImage(source,-dimensions.width/2,-dimensions.height/2,dimensions.width,dimensions.height);ctx.restore()
+        }
+        continue
+      }
       const runtime = props.runtimes[clip.id]
       if (!runtime) continue
       const t = pose(clip)
@@ -234,9 +253,9 @@ function draw() {
     }
     for (const id of pausedFrames.keys()) if (!props.clips.some(c=>c.id===id)) pausedFrames.delete(id)
   }
-  raf = requestAnimationFrame(draw)
 }
-defineExpose({ getCanvas: () => canvas.value })
+function draw(){paint();raf=requestAnimationFrame(draw)}
+defineExpose({ getCanvas: () => {paint();return canvas.value} })
 function resizePreview(){
   if(!preview.value)return
   const width=Math.max(1,preview.value.clientWidth-24),height=Math.max(1,preview.value.clientHeight-24)
@@ -264,7 +283,7 @@ onMounted(() => {
   resizeObserver.observe(preview.value)
   raf = requestAnimationFrame(draw)
 })
-onBeforeUnmount(() => {endPan();window.removeEventListener('blur',cancelPan);pointerUp({type:'pointercancel'});endNudge();window.removeEventListener('keyup',nudgeUp);window.removeEventListener('blur',endNudge);document.removeEventListener('pointermove',trackMouse);document.removeEventListener('pointerout',clearMouse);imageRequest++;backgroundImage=null;cancelAnimationFrame(raf);resizeObserver?.disconnect()})
+onBeforeUnmount(() => {images.destroy();endPan();window.removeEventListener('blur',cancelPan);pointerUp({type:'pointercancel'});endNudge();window.removeEventListener('keyup',nudgeUp);window.removeEventListener('blur',endNudge);document.removeEventListener('pointermove',trackMouse);document.removeEventListener('pointerout',clearMouse);imageRequest++;backgroundImage=null;cancelAnimationFrame(raf);resizeObserver?.disconnect()})
 </script>
 <style scoped>
 .scene-preview { flex:1; min-height:220px; display:flex; flex-direction:column; background:var(--editor-bg); overflow:hidden; position:relative; }

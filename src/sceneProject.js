@@ -1,6 +1,7 @@
 import { normalizeMotionEvents } from './timelineEvents.js'
 import { applyKeyEasing,normalizeEasing } from './keyframeEasing.js'
 import { normalizeParamValues } from './params.js'
+import { createImageClip, visualClips } from './mediaTracks.js'
 
 export const SCENE_VERSION = 4
 export const SCENE_WIDTH = 960
@@ -105,7 +106,7 @@ export function readProject(data, models) {
     clip.mouseTrack = raw.mouseTrack !== false
     clip.layerLocked = raw.layerLocked === true
     clip.layerHidden = raw.layerHidden === true
-    clip.track = Math.round(number(raw.track, index, 0, 15))
+    clip.track = Math.round(number(raw.track, index, 0, 79))
     clip.start = number(raw.start, 0, 0, project.duration - 1 / project.fps)
     clip.duration = number(raw.duration, project.duration - clip.start, 1 / project.fps, project.duration - clip.start)
     clip.offset = number(raw.offset, 0, 0, 600)
@@ -128,9 +129,34 @@ export function readProject(data, models) {
     normalizeMotionEvents(clip,project.fps)
     return clip
   })
-  for(const track of new Set(project.clips.map(c=>c.track))){const first=project.clips.find(c=>c.track===track);for(const clip of project.clips.filter(c=>c.track===track)){clip.layerName=first.layerName;clip.layerLocked=first.layerLocked;clip.layerHidden=first.layerHidden}}
-  // v3 旧工程不含图片/背景/音频/素材集合；v4 的 imageClips/backgroundClips/audioClips/assets 的逐项解析
-  // 有意留待 M2/M4 在此处读取并校验，在此之前 v4 读取沿用 createProject() 的空默认值，故这里只对 v3 置空。
+  if (data.version === 4 && data.imageClips != null) {
+    if (!Array.isArray(data.imageClips)) throw new Error('图片片段列表无效')
+    if (data.imageClips.length > 64) throw new Error('单个工程最多 64 个图片片段')
+    project.imageClips = data.imageClips.map((raw, index) => {
+      if (!raw || typeof raw.assetId !== 'string' || !raw.assetId.trim()) throw new Error('图片片段缺少素材引用')
+      const clip = createImageClip({ id: raw.assetId, name: typeof raw.name === 'string' ? raw.name : '图片', width: number(raw.width, 320, 1, 65536), height: number(raw.height, 180, 1, 65536) })
+      clip.track = Math.round(number(raw.track, project.clips.length + index, 0, 79))
+      clip.start = number(raw.start, 0, 0, project.duration - 1 / project.fps)
+      clip.duration = number(raw.duration, project.duration - clip.start, 1 / project.fps, project.duration - clip.start)
+      clip.offset = number(raw.offset, 0, 0, 600)
+      clip.layerName = typeof raw.layerName === 'string' && raw.layerName.trim() ? raw.layerName.trim().slice(0,100) : clip.name
+      clip.layerLocked = raw.layerLocked === true
+      clip.layerHidden = raw.layerHidden === true
+      for (const [key, min, max] of [['x', -1920, 1920], ['y', -1080, 1080], ['scale', .1, 5], ['rotation', -180, 180], ['opacity', 0, 1]]) {
+        clip.transform[key] = number(raw.transform?.[key], clip.transform[key], min, max)
+        for (const k of Array.isArray(raw.keyframes?.['@'+key]) ? raw.keyframes['@'+key] : []) {
+          if (!k || !Number.isFinite(k.frame) || k.frame < 0 || !Number.isFinite(k.value)) continue
+          const at = Math.round(k.frame)
+          setClipKeyframe(clip, '@'+key, at, number(k.value, 0, min, max))
+          clip.keyframes['@'+key].find(v => v.frame === at).easing = normalizeEasing(k.easing)
+        }
+      }
+      return clip
+    })
+  }
+  const all = visualClips(project)
+  for(const track of new Set(all.map(c=>c.track))){const first=all.find(c=>c.track===track);for(const clip of all.filter(c=>c.track===track)){clip.layerName=first.layerName;clip.layerLocked=first.layerLocked;clip.layerHidden=first.layerHidden}}
+  // Background/audio clips and packed assets are reserved for M3/M4.
   if (data.version === 3) {
     project.imageClips = []
     project.backgroundClips = []

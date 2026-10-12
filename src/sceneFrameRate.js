@@ -1,10 +1,11 @@
 import { normalizeMotionEvents } from './timelineEvents.js'
 import { setClipKeyframe } from './sceneProject.js'
+import { visualClips } from './mediaTracks.js'
 
 export function changeProjectFps(project, frame, next) {
   if (![24, 30, 60].includes(next) || next === project.fps) return frame
   const ratio = next / project.fps
-  for (const clip of project.clips) {
+  for (const clip of visualClips(project)) {
     for (const [key, keys] of Object.entries(clip.keyframes)) {
       delete clip.keyframes[key]
       for (const k of keys) {
