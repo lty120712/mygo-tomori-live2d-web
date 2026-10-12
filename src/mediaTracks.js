@@ -81,6 +81,18 @@ export function backgroundGaps(clips, duration, fps = 30) {
   if (duration > at + 1e-9) gaps.push({ start: round(at), duration: round(duration - at) })
   return gaps
 }
+
+/** 复制背景片段：只带走「长什么样」的信息，位置与时长在粘贴时按播放头重新决定。 */
+export function backgroundClipTemplate(clip) {
+  return clip.kind === 'color'
+    ? { kind: 'color', color: clip.color }
+    : { kind: 'image', assetId: clip.assetId, name: clip.name }
+}
+export function createClipFromTemplate(template, start = 0, duration = 5) {
+  return template.kind === 'color'
+    ? createColorBackgroundClip(template.color, start, duration)
+    : createImageBackgroundClip({ id: template.assetId, name: template.name }, start, duration)
+}
 /**
  * 把 legacy base64 背景图迁入素材库改写成背景片段并清空旧字段。
  * 只填补空档，因此迁移出来的片段不会和已有（或同一步新增的）片段重叠。

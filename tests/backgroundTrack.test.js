@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { BACKGROUND_CLIP_LIMIT, backgroundClipLimit, backgroundAtTime, backgroundGaps, createColorBackgroundClip, createImageBackgroundClip, planBackgroundAdd, migrateLegacyBackground, paintBackground } from '../src/mediaTracks.js'
+import { BACKGROUND_CLIP_LIMIT, backgroundClipLimit, backgroundAtTime, backgroundClipTemplate, backgroundGaps, createClipFromTemplate, createColorBackgroundClip, createImageBackgroundClip, planBackgroundAdd, migrateLegacyBackground, paintBackground } from '../src/mediaTracks.js'
 import { planClipMove, applyClipStarts } from '../src/clipSelection.js'
 import { createProject } from '../src/sceneProject.js'
 
@@ -123,4 +123,20 @@ test('背景绘制：纯色填充、图片拉伸、素材缺失回退纯色', ()
   const legacy = { width: 4, height: 4 }
   assert.equal(paintBackground(ctx, { kind: 'legacy-image', image: 'data:image/png;base64,AA' }, { ...size, legacyImage: legacy, fallback: '#00b140' }), 'legacy-image')
   assert.deepEqual(calls, [['drawImage', legacy, 0, 0, 960, 540]])
+})
+
+test('复制背景片段只带走外观，粘贴按播放头重新定位并沿用自动填充', () => {
+  const color = createColorBackgroundClip('#1050d0', 2, 3), image = createImageBackgroundClip(asset, 4, 2)
+  const colorTemplate = backgroundClipTemplate(color), imageTemplate = backgroundClipTemplate(image)
+  assert.deepEqual(colorTemplate, { kind: 'color', color: '#1050d0' })
+  assert.deepEqual(imageTemplate, { kind: 'image', assetId: 'bg-image', name: '天空.png' })
+  const pasted = createClipFromTemplate(colorTemplate, 6, 5)
+  assert.equal(pasted.kind, 'color'); assert.equal(pasted.color, '#1050d0')
+  assert.equal(pasted.start, 6); assert.equal(pasted.duration, 5); assert.equal(pasted.assetId, '')
+  const pastedImage = createClipFromTemplate(imageTemplate, 0, 1)
+  assert.equal(pastedImage.kind, 'image'); assert.equal(pastedImage.assetId, 'bg-image'); assert.equal(pastedImage.name, '天空.png')
+  assert.notEqual(pasted.id, color.id)
+  const plan = planBackgroundAdd([createColorBackgroundClip('#111111', 3, 2)], createClipFromTemplate(colorTemplate, 0, 5), { duration: 10, fps: 30 })
+  assert.equal(plan.clip.duration, 3)
+  assert.equal(plan.clip.color, '#1050d0')
 })

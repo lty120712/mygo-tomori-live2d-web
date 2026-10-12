@@ -2,6 +2,7 @@
   <section ref="timelineRoot" tabindex="0" @copy="copyKeyEvent" @paste="pasteKeyEvent" @keydown="selectionShortcut" @keyup="endFrameStep" @focusout="stopFrameStep" @pointerdown.capture="focusTimeline" class="multi-timeline" :style="{height:Math.max(timelineHeight,minimumTimelineHeight)+'px'}" @pointermove="moveSeek" @pointerup="endSeek" @pointercancel="endSeek" @lostpointercapture="endSeek">
     <div class="timeline-resizer" role="separator" aria-orientation="horizontal" aria-label="调整时间线高度" tabindex="0" title="向上拖动展开时间线，向下拖动扩大画布" @pointerdown="beginResize" @pointermove.stop="resizeTimeline" @pointerup="endResize" @pointercancel="endResize" @lostpointercapture="endResize" @keydown.up.prevent="timelineHeight=Math.min(maxHeight(),timelineHeight+20)" @keydown.down.prevent="timelineHeight=Math.max(minimumTimelineHeight,timelineHeight-20)"><span></span></div>
     <div class="timeline-tools"><div class="tool-group" role="group" aria-label="时间线选择"><span>时间线</span><button :aria-pressed="boxMode" title="轨道空白处框选片段；菱形所在区域框选关键帧；Ctrl / Shift 追加选择" @click="boxMode=!boxMode">框选</button></div><div class="tool-group context-tools" role="group" aria-label="所选片段操作"><template v-if="selectedEvent"><span :title="selectedEvent.name">已选{{selectedEvent.type==='motion' ? '动作' : '表情'}}</span><button :disabled="disabled" @click="copyEvent">复制片段</button><button :disabled="editDisabled || !eventClipboard" @click="pasteCopiedEvent">粘贴片段</button><button :disabled="editDisabled" @click="deleteEvent">删除片段</button></template><template v-if="selectedClips.length || clipClipboard"><span v-if="selectedClips.length">已选 {{selectedClips.length}} 个片段</span><button :disabled="disabled || !selectedClips.length" @click="copyModels">复制片段</button><button :disabled="disabled || !clipClipboard" @click="pasteModels">粘贴片段</button><button v-if="selectedClips.length" :disabled="disabled" @click="deleteClips">删除所选片段</button></template></div><div v-if="selectedKeys.length || keyClipboard" class="tool-group" role="group" aria-label="关键帧复制粘贴"><span v-if="selectedKeys.length" title="← / → 移动选中帧；长按连续移动；拖动任意选中菱形整体移动">已选 {{selectedKeys.length}} 帧</span><button :disabled="disabled || !selectedKeys.length" @click="copySelection" title="复制所选关键帧（Ctrl+C / ⌘C）">复制帧</button><button :disabled="editDisabled || !keyClipboard" @click="pasteSelection" :title="pastePlan.error || '粘贴到播放头（Ctrl+V / ⌘V）；同属性同帧会替换'">粘贴帧</button><button v-if="selectedKeys.length" :disabled="disabled || refsLocked(selectedKeys)" @click="deleteSelection">删除选中帧</button></div><div class="tool-group zoom-tools" role="group" aria-label="时间线视图"><button aria-label="缩小时间线" :disabled="zoomLevel===0 || !!dragging" @click="changeZoom(zoomLevel-1)">−</button><input aria-label="时间线缩放" type="range" min="0" max="4" step="1" :value="zoomLevel" :disabled="dragging" @input="changeZoom(Number($event.target.value))" /><button aria-label="放大时间线" :disabled="zoomLevel===4 || !!dragging" @click="changeZoom(zoomLevel+1)">＋</button><span>{{zoom}}×</span><button :disabled="zoomLevel===0 || !!dragging" @click="changeZoom(0)">适合全长</button><label title="拖动时按住 Alt 临时关闭吸附"><input type="checkbox" role="switch" aria-label="时间线吸附" v-model="snapping" />吸附</label><small title="拖动时按住 Alt 临时关闭吸附；Ctrl + 滚轮缩放">Alt · Ctrl + 滚轮</small></div></div>
+    <div v-if="backgroundSelection" class="timeline-tools background-tools"><div class="tool-group" role="group" aria-label="所选背景片段操作"><span>已选 1 个背景片段</span><button :disabled="disabled" title="复制所选背景片段（Ctrl+C）" @click="copyBackgroundClip()">复制片段</button><button :disabled="editDisabled || !backgroundClipboard" title="粘贴到播放头（Ctrl+V）" @click="pasteBackgroundClip()">粘贴片段</button><button :disabled="disabled" @click="deleteBackgroundSelection()">删除所选片段</button></div></div>
     <div v-if="clipboardNotice" class="clipboard-notice" role="status" :title="clipboardNotice">{{clipboardNotice}}</div>
     <div v-if="selected" class="key-tools"><div class="tool-group" role="group" aria-label="关键帧属性选择"><button :aria-expanded="showKeyRows" @click="showKeyRows=!showKeyRows">{{showKeyRows ? '收起关键帧' : '展开关键帧'}}</button><select aria-label="关键帧属性" v-model="keyProperty"><option v-for="key in keyProperties" :key="key" :value="key">{{labels[key] || key}} · {{(selected.keyframes[key] || []).length}} 帧</option></select></div><div class="tool-group" role="group" aria-label="关键帧编辑"><button aria-label="上一个关键帧" :disabled="disabled || !previousKey" @click="chooseKey(previousKey)">‹</button><button aria-label="添加或删除当前关键帧" :class="{keyed:currentKey}" :disabled="editDisabled || !withinClip" @click="emit('toggle-key',keyProperty)">◆</button><button aria-label="下一个关键帧" :disabled="disabled || !nextKey" @click="chooseKey(nextKey)">›</button><label>{{labels[keyProperty] || keyProperty}}{{ valueDisplay(keyProperty).unit }}<input aria-label="关键帧属性值" type="number" :min="valueDisplay(keyProperty).min" :max="valueDisplay(keyProperty).max" step="1" :value="valueDisplay(keyProperty).toDisplay(propertyValue)" :disabled="editDisabled || !withinClip" @focus="emit('begin-edit')" @blur="$event.target.value=valueDisplay(keyProperty).toDisplay(propertyValue);emit('end-edit')" @input="emit('edit-key-value',keyProperty,valueDisplay(keyProperty).toNative($event.target.value))" /></label><button :disabled="editDisabled || !currentKey" @click="emit('remove-key',keyProperty,currentFrame)">删除关键帧</button><button :disabled="editDisabled || (!selectedKeys.length && !currentKey)" @click="openCurveEditor">速度曲线</button></div><small class="neighbor-description" :title="neighborDescription">{{neighborDescription}}</small></div>
     <div ref="scrollArea" class="timeline-scroll" @wheel="wheelZoom"><div class="timeline-content" :style="{width: (170+laneWidth)+'px'}">
@@ -90,11 +91,17 @@
         <template v-if="menu.background">
           <span class="menu-section">背景片段 · {{backgroundLabel(menu.background)}}</span>
           <label v-if="menu.background.kind==='color'">颜色<input type="color" aria-label="背景片段颜色" :value="backgroundMenuColor" @input="applyBackgroundColor" @focus="emit('begin-edit')" @blur="emit('end-edit')" /></label>
+          <button role="menuitem" :disabled="disabled" @click="copyBackgroundClip()">复制背景片段<kbd>Ctrl+C</kbd></button>
+          <button role="menuitem" :disabled="disabled || !backgroundClipboard" @click="pasteBackgroundClip()">粘贴背景片段<kbd>Ctrl+V</kbd></button>
           <button role="menuitem" :disabled="disabled" @click="emit('background-edit',menu.background.id,{start:props.time});closeMenu()">移动到播放头</button>
           <button role="menuitem" :disabled="disabled" @click="emit('background-edit',menu.background.id,{duration:props.duration-menu.background.start});closeMenu()">延伸到工程结尾</button>
           <button role="menuitem" class="menu-delete" :disabled="disabled" @click="emit('delete-background',menu.background.id);closeMenu()">删除背景片段</button>
         </template>
-        <span v-else class="menu-hint">在左侧「＋纯色」添加纯色片段，或到素材库「图片」分类点「背景」添加图片片段。</span>
+        <template v-else>
+          <span class="menu-history">背景轨道 · {{formatTimecode(props.time,props.fps)}} 起</span>
+          <button v-if="backgroundClipboard" role="menuitem" :disabled="disabled" @click="pasteBackgroundClip()">粘贴背景片段<kbd>Ctrl+V</kbd></button>
+          <span class="menu-hint">用左侧「＋纯色」「＋图片」添加片段；选中片段后 Ctrl+C 复制。</span>
+        </template>
       </template>
       <template v-else-if="menu.kind==='background-color'">
         <span class="menu-section">添加纯色背景 · {{formatTimecode(props.time,props.fps)}} 起</span>
@@ -117,7 +124,7 @@
 import { ref,computed,watch,nextTick,onMounted,onBeforeUnmount } from 'vue'
 import KeyframeCurveEditor from './KeyframeCurveEditor.vue'
 import {EASING_PRESETS,normalizeEasing,easingLabel} from '../keyframeEasing.js'
-import { isImageClip } from '../mediaTracks.js'
+import { backgroundClipTemplate, isImageClip } from '../mediaTracks.js'
 import {copyClips,planClipMove,planClipSplit} from '../clipSelection.js'
 import { eventRange,eventProgress,planEventEdit } from '../timelineEvents.js'
 import { copyKeyRefs,planKeyPaste } from '../keyframeClipboard.js'
@@ -129,7 +136,7 @@ import { editTimelineClip,timelineTicks } from '../timelineEditing.js'
 import { assetStore } from '../assetStore.js'
 import { groupedClipKeys,visibleClipKeys,uniqueKeyRefs,planKeyRefMove } from '../timelineKeyframes.js'
 const props=defineProps({clips:Array,backgroundClips:{type:Array,default:()=>[]},selectedIds:Array,duration:Number,fps:Number,time:Number,selectedId:String,selected:Object,labels:Object,pose:Object,runtimes:Object,transformFields:Array,disabled:Boolean,navigationDisabled:Boolean})
-const emit=defineEmits(['selection-change','clear-selection','batch-clips','batch-keys','select','seek','layer-state','rename-layer','reorder-layer','edit-clip','remove-key','move-key','toggle-key','edit-key-value','edit-event','paste-event','remove-event','begin-edit','end-edit','delete-selected','add-background-color','background-edit','delete-background','background-image','import-background-image'])
+const emit=defineEmits(['selection-change','clear-selection','batch-clips','batch-keys','select','seek','layer-state','rename-layer','reorder-layer','edit-clip','remove-key','move-key','toggle-key','edit-key-value','edit-event','paste-event','remove-event','begin-edit','end-edit','delete-selected','add-background-color','background-edit','delete-background','background-image','import-background-image','paste-background'])
 const timelineRoot=ref(null),scrollArea=ref(null),ruler=ref(null),selectedKeys=ref([]),boxMode=ref(true),boxRect=ref(null),menu=ref(null),menuValue=ref(0),menuNativeValue=ref(0),menuTime=ref(0),menuEasing=ref('linear')
 const curveEdit=ref(null)
 const menuPreset=computed({get:()=>typeof menuEasing.value==='object' ? 'custom' : menuEasing.value,set:value=>{if(value==='custom')openCurveEditor();else menuEasing.value=value}})
@@ -183,13 +190,20 @@ function modelShortcut(e){
   if(e.defaultPrevented || e.isComposing || e.target.closest('input,select,textarea,[contenteditable]'))return false
   if(e.key==='Escape'){e.preventDefault();e.stopPropagation();clearSelection();return true}
   const key=e.key.toLowerCase()
-  if((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && ((key==='c' && selectedClips.value.length) || (key==='v' && clipClipboard.value))){e.preventDefault();e.stopPropagation();if(!e.repeat)(key==='c' ? copyModels() : pasteModels());return true}
+  if((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && ((key==='c' && (selectedClips.value.length || backgroundSelection.value)) || (key==='v' && (clipClipboard.value || backgroundClipboard.value)))){
+    e.preventDefault();e.stopPropagation()
+    if(!e.repeat){
+      if(key==='c')selectedClips.value.length ? copyModels() : copyBackgroundClip()
+      else clipClipboard.value ? pasteModels() : pasteBackgroundClip()
+    }
+    return true
+  }
   if(e.key==='Delete' && selectedClips.value.length && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey){e.preventDefault();e.stopPropagation();if(!e.repeat)deleteClips();return true}
   if(e.key==='Delete' && backgroundSelection.value && !selectedClips.value.length && !selectedKeys.value.length && !selectedEvent.value && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey){e.preventDefault();e.stopPropagation();if(!e.repeat)deleteBackgroundSelection();return true}
   return false
 }
-function copyKeyEvent(e){if(e.target.closest('input,select,textarea,[contenteditable]') || props.disabled)return;if(selectedClips.value.length){e.preventDefault();copyModels()}else if(selectedEvent.value){e.preventDefault();copyEvent()}else if(selectedKeys.value.length){e.preventDefault();copySelection();e.clipboardData?.setData('text/plain',JSON.stringify({type:'tomori-keyframes',...keyClipboard.value}))}}
-function pasteKeyEvent(e){if(e.target.closest('input,select,textarea,[contenteditable]') || props.disabled)return;if(clipClipboard.value){e.preventDefault();pasteModels()}else if(eventClipboard.value && !selectedKeys.value.length){e.preventDefault();pasteCopiedEvent()}else if(keyClipboard.value){e.preventDefault();pasteSelection()}}
+function copyKeyEvent(e){if(e.target.closest('input,select,textarea,[contenteditable]') || props.disabled)return;if(selectedClips.value.length){e.preventDefault();copyModels()}else if(selectedEvent.value){e.preventDefault();copyEvent()}else if(selectedKeys.value.length){e.preventDefault();copySelection();e.clipboardData?.setData('text/plain',JSON.stringify({type:'tomori-keyframes',...keyClipboard.value}))}else if(backgroundSelection.value){e.preventDefault();copyBackgroundClip()}}
+function pasteKeyEvent(e){if(e.target.closest('input,select,textarea,[contenteditable]') || props.disabled)return;if(clipClipboard.value){e.preventDefault();pasteModels()}else if(eventClipboard.value && !selectedKeys.value.length){e.preventDefault();pasteCopiedEvent()}else if(keyClipboard.value){e.preventDefault();pasteSelection()}else if(backgroundClipboard.value){e.preventDefault();pasteBackgroundClip()}}
 const isKeySelected=(clipId,key,frame)=>selectedKeys.value.some(k=>k.clipId===clipId && k.key===key && k.frame===frame)
 function selectKeys(items,e){selectedClips.value=[];selectedEventId.value='';if(e?.shiftKey || e?.ctrlKey || e?.metaKey){const all=items.every(k=>isKeySelected(k.clipId,k.key,k.frame));selectedKeys.value=all ? selectedKeys.value.filter(k=>!items.some(i=>i.clipId===k.clipId && i.key===k.key && i.frame===k.frame)) : uniqueKeyRefs([...selectedKeys.value,...items])}else if(!items.every(k=>isKeySelected(k.clipId,k.key,k.frame)))selectedKeys.value=uniqueKeyRefs(items)}
 function deleteSelection(){if(props.disabled || refsLocked(selectedKeys.value) || !selectedKeys.value.length)return;emit('batch-keys',selectedKeys.value,{type:'delete'});selectedKeys.value=[]}
@@ -322,6 +336,28 @@ function moveBackground(e){if(!backgroundDrag)return;const d=backgroundDrag,widt
 function endBackground(){if(backgroundDrag)emit('end-edit');backgroundDrag=null;dragging.value=false;snapTime.value=null}
 function deleteBackgroundSelection(){if(props.disabled || !backgroundSelection.value)return false;emit('delete-background',backgroundSelection.value);backgroundSelection.value='';return true}
 function clickBackgroundLane(e){backgroundSelection.value='';beginSeek(e)}
+const backgroundClipboard=ref(null)
+function copyBackgroundClip(){
+  const clip=props.backgroundClips.find(c=>c.id===backgroundSelection.value)
+  if(props.disabled || !clip)return false
+  backgroundClipboard.value=backgroundClipTemplate(clip)
+  clipClipboard.value=null;keyClipboard.value=null;eventClipboard.value=null
+  clipboardNotice.value='已复制背景片段：'+backgroundLabel(clip)
+  closeMenu()
+  return true
+}
+async function pasteBackgroundClip(){
+  if(props.disabled || !backgroundClipboard.value)return false
+  clipClipboard.value=null;keyClipboard.value=null;eventClipboard.value=null
+  const before=new Set(props.backgroundClips.map(c=>c.id))
+  emit('paste-background',backgroundClipTemplate(backgroundClipboard.value))
+  clipboardNotice.value='已粘贴背景片段'
+  closeMenu()
+  await nextTick()
+  const added=props.backgroundClips.find(c=>!before.has(c.id))
+  backgroundSelection.value=added ? added.id : ''
+  return true
+}
 function openBackgroundMenu(e,clip){if(props.disabled)return;backgroundMenuColor.value=clip?.color || '#00b140';backgroundSelection.value=clip?.id || '';positionMenu(e,{kind:'background',title:clip ? '背景片段 · '+backgroundLabel(clip) : '背景轨道',background:clip})}
 function applyBackgroundColor(e){backgroundMenuColor.value=e.target.value;if(menu.value?.background)emit('background-edit',menu.value.background.id,{color:backgroundMenuColor.value})}
 
