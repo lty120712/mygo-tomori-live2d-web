@@ -21,7 +21,7 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import ClipRenderer from './ClipRenderer.vue'
-import { isImageClip, visualPose, imageDimensions } from '../mediaTracks.js'
+import { backgroundAtTime, isImageClip, paintBackground as paintSceneBackground, visualPose, imageDimensions } from '../mediaTracks.js'
 import { createImageSources } from '../imageSources.js'
 import { assetStore } from '../assetStore.js'
 import {sceneDrawOrder,sceneHitOrder} from '../sceneLayers.js'
@@ -30,13 +30,14 @@ import { beginCanvasTransform,scaleCanvasTransform,rotateCanvasTransform } from 
 import { snapCanvasPosition,nudgeCanvasPosition } from '../canvasPosition.js'
 import {selectionBounds,boxSelected,moveSelection,scaleSelection,rotateSelection,layoutSelection} from '../canvasSelection.js'
 import {isPanButton,panOffset} from '../canvasPan.js'
-const props = defineProps({ clips: Array, time: Number, fps: Number, aspectRatio:String, selected: Object, selectedIds:Array, runtimes: Object, playing: Boolean, background: String, backgroundImage: String, recording: Boolean })
+const props = defineProps({ clips: Array, backgroundClips: { type: Array, default: () => [] }, time: Number, fps: Number, aspectRatio:String, selected: Object, selectedIds:Array, runtimes: Object, playing: Boolean, background: String, backgroundImage: String, recording: Boolean })
 const emit = defineEmits(['ready', 'dispose', 'error', 'select', 'move', 'transform', 'batch-transform', 'begin-edit', 'end-edit', 'background-ready', 'mouse-position', 'image-status'])
+const backgroundAssets=computed(()=>props.backgroundClips.filter(c=>c.kind==='image' && c.assetId).map(c=>c.assetId))
 const images=createImageSources({blob:id=>assetStore.blob(id),changed:()=>{
   const clips=props.clips.filter(isImageClip)
-  emit('image-status',{loading:clips.some(c=>images.status(c.assetId)==='loading'),missing:clips.filter(c=>images.status(c.assetId)==='missing')})
+  emit('image-status',{loading:clips.some(c=>images.status(c.assetId)==='loading') || backgroundAssets.value.some(id=>images.status(id)==='loading'),missing:clips.filter(c=>images.status(c.assetId)==='missing'),backgrounds:props.backgroundClips.filter(c=>c.kind==='image' && images.status(c.assetId)==='missing')})
 }})
-watch(()=>props.clips.filter(isImageClip).map(c=>c.assetId),ids=>images.sync(ids),{immediate:true,flush:'sync'})
+watch(()=>[...props.clips.filter(isImageClip).map(c=>c.assetId),...backgroundAssets.value],ids=>images.sync(ids),{immediate:true,flush:'sync'})
 const size=computed(()=>sceneSize(props.aspectRatio))
 const previewFit=ref('width')
 const manualZoom=ref(100)
@@ -204,9 +205,8 @@ function paint() {
   const ctx = canvas.value?.getContext('2d')
   if (ctx) {
     ctx.clearRect(0, 0, size.value.width, size.value.height)
-    ctx.fillStyle = props.background
-    ctx.fillRect(0, 0, size.value.width, size.value.height)
-    if(backgroundImage)ctx.drawImage(backgroundImage,0,0,size.value.width,size.value.height)
+    const background=backgroundAtTime(props.backgroundClips,{color:props.background,image:props.backgroundImage},props.time)
+    paintSceneBackground(ctx,background,{width:size.value.width,height:size.value.height,bitmap:background.kind==='image' ? images.get(background.assetId) : null,legacyImage:backgroundImage,fallback:props.background})
     for (const clip of sceneDrawOrder(props.clips)) {
       if (!clipVisible(clip, props.time)) continue
       if(isImageClip(clip)) {

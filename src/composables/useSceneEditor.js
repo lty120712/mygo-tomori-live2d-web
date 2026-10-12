@@ -1,4 +1,4 @@
-import { visualClips, createImageClip, appendVisualClips, visualClipLimit } from '../mediaTracks.js'
+import { visualClips, createImageClip, appendVisualClips, visualClipLimit, backgroundAtTime } from '../mediaTracks.js'
 import {sampleTimelinePose} from '../timelinePose.js'
 import {applyCanvasSelection} from '../canvasSelection.js'
 import {sceneParameterOverrides} from '../sceneParameterPriority.js'
@@ -22,7 +22,7 @@ import { createProject, createClip, readProject, clipVisible, localFrame, sample
 export function useSceneEditor() {
   const project = reactive(createProject()), runtimes = shallowReactive({}), previewOverrides = reactive({})
   const allClips = computed(()=>visualClips(project))
-  const imageLoading = ref(false), missingImages = ref([])
+  const imageLoading = ref(false), missingImages = ref([]), missingBackgrounds = ref([])
   const canvasSelection=ref([])
   const selectedId = ref(''), frame = ref(0), playing = ref(false), message = ref('')
   const loopPlayback=ref(false)
@@ -40,6 +40,7 @@ export function useSceneEditor() {
   const runtime = computed(()=>runtimes[selectedId.value])
   const previewMotionInfo=computed(()=>runtime.value?.info[previewMotionName.value])
   const loading = computed(()=>backgroundLoading.value || uploadingBackground.value || imageLoading.value || project.clips.some(c=>!runtimes[c.id]))
+  const missingMedia=computed(()=>[...missingImages.value.map(c=>c.name),...missingBackgrounds.value.map(c=>c.name)].join('、'))
   const canSplit = computed(()=>selected.value && time.value>selected.value.start && time.value<selected.value.start+selected.value.duration)
   function sampleState(clip) {
     const state = sampleClip(clip,time.value,project.fps,runtimes[clip.id]?.groups || [])
@@ -200,7 +201,7 @@ export function useSceneEditor() {
     const clip=createImageClip(asset,start,Math.min(5,project.duration-start),insertFrontLayer(allClips.value))
     project.imageClips.push(clip);selectCanvas([clip.id],clip.id)
   }
-  function imageStatus(status){imageLoading.value=status.loading;missingImages.value=status.missing}
+  function imageStatus(status){imageLoading.value=status.loading;missingImages.value=status.missing;missingBackgrounds.value=status.backgrounds || []}
   function renameLayer(track,value){const name=String(value).trim().slice(0,100);if(!name)return;for(const clip of allClips.value.filter(c=>c.track===track))clip.layerName=name}
   function changeLayerState(track,patch){setLayerState(allClips.value,track,patch);drive()}
   function reorderLayer(from,to){reorderSceneLayer(allClips.value,from,to)}
@@ -386,7 +387,7 @@ export function useSceneEditor() {
   function stop(){pause();seek(0)}
   function changeDuration(value) {
     const n=Number(value);if(locked.value || !Number.isFinite(n))return
-    project.duration=Math.min(600,Math.max(.5,n,...allClips.value.map(c=>c.start+c.duration)));seek(Math.min(time.value,project.duration))
+    project.duration=Math.min(600,Math.max(.5,n,...allClips.value.map(c=>c.start+c.duration),...project.backgroundClips.map(c=>c.start+c.duration)));seek(Math.min(time.value,project.duration))
   }
   function changeFps(value) {
     if(locked.value)return
@@ -396,11 +397,12 @@ export function useSceneEditor() {
   function record() {
     if(recorder.isRecording.value){pause();recorder.stop();return}
     if(loading.value)return
-    if(missingImages.value.length)message.value='以下图片素材缺失，录制将跳过：'+missingImages.value.map(c=>c.name).join('、')
-    stop();if(recorder.start(sceneCanvas.value.getCanvas(),null,'canvas',null,null,project.fps))play();else message.value='无法开始录制'
+    if(missingMedia.value)message.value='以下素材缺失，录制将跳过：'+missingMedia.value
+    const resolveBackground=()=>{const bg=backgroundAtTime(project.backgroundClips,{color:project.background,image:project.backgroundImage},time.value);return {color:bg.kind==='color' ? bg.color : project.background}}
+    stop();if(recorder.start(sceneCanvas.value.getCanvas(),null,'canvas',resolveBackground,null,project.fps))play();else message.value='无法开始录制'
   }
   function exportProject() {
-    message.value=missingImages.value.length ? '工程已导出，但以下图片素材缺失：'+missingImages.value.map(c=>c.name).join('、') : '工程已导出；图片引用本浏览器素材库，尚不包含图片文件'
+    message.value=missingMedia.value ? '工程已导出，但以下素材缺失：'+missingMedia.value : '工程已导出；图片引用本浏览器素材库，尚不包含图片文件'
     const url=URL.createObjectURL(new Blob([JSON.stringify(project,null,2)],{type:'application/json'}))
     const a=document.createElement('a');a.href=url;a.download='tomori-v0.1-'+Date.now()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)
   }
@@ -428,5 +430,5 @@ export function useSceneEditor() {
     initialized=true
   })
   onBeforeUnmount(()=>{window.removeEventListener('keydown',shortcut);window.removeEventListener('pagehide',saveProject);pause();clearInterval(previewTimer);saveProject();recorder.destroy()})
-  return {allClips,imageStatus,missingImages,addImage:editable(addImage),sceneTimeline,selectTimeline,changeAspectRatio:editable(changeAspectRatio),canvasSelection,selectCanvas,batchCanvasTransform:editable(batchCanvasTransform),batchClips:editable(batchClips),editLocked,changeLayerState:editable(changeLayerState),project,runtimes,selectedId,playing,loopPlayback,message,paramSearch,allParams,autoTransform,sceneCanvas,projectInput,recorder,locked,time,selected,runtime,loading,canSplit,selectedPose,paramLabels,assetModels:models,visibleParams,transformFields,hasKey,previewMotionName,previewExpressionName,activePreview,previewMotionInfo,previewProgress,preview,resetPreview,endPreview,mouseMoved,changeMouseTrack:editable(changeMouseTrack),addChosenEvent:editable(addChosenEvent),canUndo,canRedo,undo,redo,beginEdit,endEdit,renameClip:editable(renameClip,true),changeBackground:editable(changeBackground,true),backgroundInput,backgroundLoading,uploadingBackground,uploadBackground,removeBackgroundImage:editable(removeBackgroundImage),resetBackground:editable(resetBackground),addModel:editable(addModel),renameLayer:editable(renameLayer),reorderLayer:editable(reorderLayer),editClip:editable(editClip,true),editTiming:editable(editTiming,true),editTransform:editable(editTransform,true),resetPlacement:editable(resetPlacement),moveModel:editable(moveModel),transformModel:editable(transformModel),editParam:editable(editParam,true),resetParam:editable(resetParam),toggleKey:editable(toggleKey),removeKey:editable(removeKey),moveKey:editable(moveKey),batchKeys:editable(batchKeys),editKeyValue:editable(editKeyValue,true),editEvent:editable(editEvent),pasteEvent:editable(pasteEvent),removeEvent:editable(removeEvent),duplicate:editable(duplicate),split:editable(split),deleteSelected:editable(deleteSelected),runtimeReady,disposeRuntime,runtimeError,addEvent:editable(addEvent),play,pause,seek,stop,changeDuration:editable(changeDuration,true),changeFps:editable(changeFps),record,exportProject,importProject}
+  return {allClips,imageStatus,missingImages,missingBackgrounds,addImage:editable(addImage),sceneTimeline,selectTimeline,changeAspectRatio:editable(changeAspectRatio),canvasSelection,selectCanvas,batchCanvasTransform:editable(batchCanvasTransform),batchClips:editable(batchClips),editLocked,changeLayerState:editable(changeLayerState),project,runtimes,selectedId,playing,loopPlayback,message,paramSearch,allParams,autoTransform,sceneCanvas,projectInput,recorder,locked,time,selected,runtime,loading,canSplit,selectedPose,paramLabels,assetModels:models,visibleParams,transformFields,hasKey,previewMotionName,previewExpressionName,activePreview,previewMotionInfo,previewProgress,preview,resetPreview,endPreview,mouseMoved,changeMouseTrack:editable(changeMouseTrack),addChosenEvent:editable(addChosenEvent),canUndo,canRedo,undo,redo,beginEdit,endEdit,renameClip:editable(renameClip,true),changeBackground:editable(changeBackground,true),backgroundInput,backgroundLoading,uploadingBackground,uploadBackground,removeBackgroundImage:editable(removeBackgroundImage),resetBackground:editable(resetBackground),addModel:editable(addModel),renameLayer:editable(renameLayer),reorderLayer:editable(reorderLayer),editClip:editable(editClip,true),editTiming:editable(editTiming,true),editTransform:editable(editTransform,true),resetPlacement:editable(resetPlacement),moveModel:editable(moveModel),transformModel:editable(transformModel),editParam:editable(editParam,true),resetParam:editable(resetParam),toggleKey:editable(toggleKey),removeKey:editable(removeKey),moveKey:editable(moveKey),batchKeys:editable(batchKeys),editKeyValue:editable(editKeyValue,true),editEvent:editable(editEvent),pasteEvent:editable(pasteEvent),removeEvent:editable(removeEvent),duplicate:editable(duplicate),split:editable(split),deleteSelected:editable(deleteSelected),runtimeReady,disposeRuntime,runtimeError,addEvent:editable(addEvent),play,pause,seek,stop,changeDuration:editable(changeDuration,true),changeFps:editable(changeFps),record,exportProject,importProject}
 }

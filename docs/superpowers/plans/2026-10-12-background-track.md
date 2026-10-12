@@ -440,17 +440,25 @@ import { visualClips, createImageClip, appendVisualClips, visualClipLimit, backg
 <div v-if="missingImages.length || missingBackgrounds.length" class="editor-message" role="alert">素材缺失或无法读取：{{[...missingImages,...missingBackgrounds].map(c=>c.name).join('、')}}。片段仍保留；请在原浏览器恢复素材。</div>
 ```
 
+4. 只有背景片段、没有模型或图片的工程也要能录制，录制按钮的禁用条件补上背景：
+
+```html
+:disabled="loading || (!recorder.isRecording.value && !allClips.length && !project.backgroundClips.length)"
+```
+
 - [ ] **Step 3: 构建与浏览器验证**
 
 Run: `npm run build`（`needs escalation for Vite realpath`）
 Expected: 构建成功，保留既有大包提示。
 
-浏览器：`npm run dev -- --host 127.0.0.1 --port 5174`，导入一个 `backgroundClips` 覆盖前半段为纯色、后半段为图片的工程 JSON：
+浏览器：`npm run dev -- --host 127.0.0.1 --port 5174`，导入一个 `backgroundClips` 覆盖前半段为纯色、后半段为图片的工程 JSON（示例 fixture：前 3 秒 `#00ffff` 纯色、3–6 秒指向缺失素材的图片片段、6 秒后只有 legacy `backgroundImage` 与兜底色 `#ffe600`）：
 
 - 播放头在前半段显示纯色，跨过切换点显示图片并铺满整个画布；竖屏工程同样铺满。
 - 覆盖区间之外回退 `project.background`；`backgroundImage` 仍然作为兜底显示。
 - 工程引用的背景素材在素材库删除后，画布回退纯色并出现缺失提示，控制台无错误。
 - 录制一段跨切换点的视频，下载文件可播放，画面背景与预览一致。
+
+取色验证：截图交给 `System.Drawing` 逐像素统计（会话无图像查看能力时用颜色像素数代替肉眼比对），例如 1 秒处出现约 7.2 万像素的青色、4 秒处出现同量级的回退黄色、7 秒处出现 legacy 品红；播放中重复采样确认背景跟随播放头。
 
 - [ ] **Step 4: 提交**
 

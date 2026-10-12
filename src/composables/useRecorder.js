@@ -32,35 +32,17 @@ export function useRecorder() {
   let outCtx = null
   let audioCtx = null
   let audioDest = null
-  let bgImage = null
-  let bgImageSrc = ''
   let readBackground = null
   let readViewRect = null
   let mode = 'canvas'
 
-  /** 背景图换了才重建，避免每帧都创建 Image */
-  function syncBgImage(src) {
-    if (src === bgImageSrc) return
-    bgImageSrc = src
-    if (!src) {
-      bgImage = null
-      return
-    }
-    const img = new Image()
-    img.src = src
-    bgImage = img
-  }
-
   /**
-   * 铺背景：有图就拉伸铺满（用户要求按画布大小拉伸），否则填纯色。
-   * 绿幕抠像用的就是这条路。
+   * 铺兜底背景：合成画布本身已经按播放头画好背景（见 mediaTracks.paintBackground），
+   * 这里只保证录制画面不透底，颜色取自工程当前的背景解析结果。
    */
   function paintBackground(ctx, width, height) {
-    if (bgImage && bgImage.complete && bgImage.naturalWidth) {
-      ctx.drawImage(bgImage, 0, 0, width, height)
-      return
-    }
-    ctx.fillStyle = (readBackground && readBackground()?.color) || DEFAULT_BG_COLOR
+    const background = readBackground && readBackground()
+    ctx.fillStyle = (background && background.color) || DEFAULT_BG_COLOR
     ctx.fillRect(0, 0, width, height)
   }
 
@@ -122,8 +104,6 @@ export function useRecorder() {
     const outW = outCvs.width
     const outH = outCvs.height
 
-    const bg = (readBackground && readBackground()) || {}
-    syncBgImage(bg.image || '')
     paintBackground(outCtx, outW, outH)
 
     if (mode === 'portrait') {
