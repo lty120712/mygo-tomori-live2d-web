@@ -82,13 +82,14 @@ export function backgroundGaps(clips, duration, fps = 30) {
   return gaps
 }
 
-/** 复制背景片段：只带走「长什么样」的信息，位置与时长在粘贴时按播放头重新决定。 */
+/** 复制背景片段：带走外观与时长；起点由粘贴时的播放头决定。 */
 export function backgroundClipTemplate(clip) {
-  return clip.kind === 'color'
+  const look = clip.kind === 'color'
     ? { kind: 'color', color: clip.color }
     : { kind: 'image', assetId: clip.assetId, name: clip.name }
+  return { ...look, duration: clip.duration }
 }
-export function createClipFromTemplate(template, start = 0, duration = 5) {
+export function createClipFromTemplate(template, start = 0, duration = template.duration || 5) {
   return template.kind === 'color'
     ? createColorBackgroundClip(template.color, start, duration)
     : createImageBackgroundClip({ id: template.assetId, name: template.name }, start, duration)

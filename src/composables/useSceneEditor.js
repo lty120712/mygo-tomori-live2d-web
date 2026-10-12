@@ -221,20 +221,22 @@ export function useSceneEditor() {
     // 迁移素材在校验之前就准备好了：编辑被拒绝时把它删掉，避免留下没人引用的重复素材。
     history.edit(()=>{const applied=mutate(asset)!==false;if(!applied && asset)assetStore.remove(asset.id).catch(()=>{})})
   }
-  function placeBackgroundClip(clip,legacyAsset){
+  function placeBackgroundClip(clip,legacyAsset,preferred=5){
     const limit=backgroundClipLimit(project.backgroundClips)
     if(limit){message.value=limit;return false}
-    const plan=planBackgroundAdd(project.backgroundClips,clip,{duration:project.duration,fps:project.fps})
+    const plan=planBackgroundAdd(project.backgroundClips,clip,{duration:project.duration,fps:project.fps,preferred})
     if(plan.error){message.value=plan.error;return false}
     // 迁移出来的旧背景图只填补空档，因此第一次添加不会撞上自己。
     if(legacyAsset)migrateLegacyBackground(project,legacyAsset,plan.clip)
     project.backgroundClips.push(plan.clip)
-    message.value=plan.clip.kind==='color' ? '已在播放头添加纯色背景片段' : '已在播放头添加背景图片片段：'+plan.clip.name
+    const shortened=preferred-plan.clip.duration>1e-6
+    message.value=(plan.clip.kind==='color' ? '已在播放头添加纯色背景片段' : '已在播放头添加背景图片片段：'+plan.clip.name)
+      +(shortened ? '（剩余空间不足，已缩短为 '+plan.clip.duration.toFixed(2)+' 秒）' : '')
     return true
   }
   const addBackgroundColor=color=>withBackgroundEdit(legacy=>placeBackgroundClip(createColorBackgroundClip(color,backgroundStart(),backgroundLength(backgroundStart())),legacy))
   const addBackgroundImage=asset=>withBackgroundEdit(legacy=>placeBackgroundClip(createImageBackgroundClip(asset,backgroundStart(),backgroundLength(backgroundStart())),legacy))
-  const pasteBackgroundClip=template=>withBackgroundEdit(legacy=>placeBackgroundClip(createClipFromTemplate(template,backgroundStart(),backgroundLength(backgroundStart())),legacy))
+  const pasteBackgroundClip=template=>withBackgroundEdit(legacy=>placeBackgroundClip(createClipFromTemplate(template,backgroundStart()),legacy,template.duration || 5))
   function editBackground(id,patch){
     const clip=project.backgroundClips.find(c=>c.id===id);if(!clip)return false
     if(patch.color!==undefined){if(clip.kind==='color' && /^#[0-9a-f]{6}$/i.test(patch.color))clip.color=patch.color;return}
