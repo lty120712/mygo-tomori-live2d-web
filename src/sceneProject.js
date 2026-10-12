@@ -2,7 +2,7 @@ import { normalizeMotionEvents } from './timelineEvents.js'
 import { applyKeyEasing,normalizeEasing } from './keyframeEasing.js'
 import { normalizeParamValues } from './params.js'
 
-export const SCENE_VERSION = 3
+export const SCENE_VERSION = 4
 export const SCENE_WIDTH = 960
 export const SCENE_HEIGHT = 540
 export function sceneSize(aspectRatio){return aspectRatio==='9:16' ? {width:540,height:960} : {width:960,height:540}}
@@ -10,7 +10,7 @@ export function uid(prefix = 'clip') {
   return prefix + '-' + crypto.randomUUID()
 }
 export function createProject() {
-  return { version: SCENE_VERSION, aspectRatio:'16:9', fps: 30, duration: 10, background: '#00b140', backgroundImage: '', backgroundImageName: '', clips: [] }
+  return { version: SCENE_VERSION, aspectRatio:'16:9', fps: 30, duration: 10, background: '#00b140', backgroundImage: '', backgroundImageName: '', clips: [], imageClips: [], backgroundClips: [], audioClips: [], assets: {} }
 }
 export function createClip(model, start = 0, duration = 5, track = 0) {
   return {
@@ -92,7 +92,7 @@ export function readProject(data, models) {
     project.backgroundImage=data.backgroundImage
     project.backgroundImageName=typeof data.backgroundImageName==='string' ? data.backgroundImageName : '背景图片'
   }
-  if (data.version !== SCENE_VERSION) throw new Error('无法识别工程版本，仅支持多模型场景工程')
+  if (data.version !== 3 && data.version !== SCENE_VERSION) throw new Error('无法识别工程版本，仅支持多模型场景工程')
   const source = data.clips
   if (!Array.isArray(source)) throw new Error('缺少模型片段')
   if (source.length > 16) throw new Error('单个工程最多 16 个模型片段')
@@ -129,5 +129,9 @@ export function readProject(data, models) {
     return clip
   })
   for(const track of new Set(project.clips.map(c=>c.track))){const first=project.clips.find(c=>c.track===track);for(const clip of project.clips.filter(c=>c.track===track)){clip.layerName=first.layerName;clip.layerLocked=first.layerLocked;clip.layerHidden=first.layerHidden}}
+  project.imageClips = []
+  project.backgroundClips = []
+  project.audioClips = []
+  project.assets = {}
   return project
 }
