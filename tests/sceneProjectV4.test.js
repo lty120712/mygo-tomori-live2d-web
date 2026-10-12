@@ -28,6 +28,14 @@ test('v3 旧工程读取后补齐新字段', () => {
   assert.deepEqual(p.assets, {})
 })
 
+test('v4 的图片/背景/音频/素材集合在 M1 读取时置空，逐项解析留待 M2/M4', () => {
+  const p = readProject({ version: 4, clips: [], imageClips: [{ id: 'x' }], backgroundClips: [{ id: 'y' }], audioClips: [{ id: 'z' }], assets: { a: 1 } }, models)
+  assert.deepEqual(p.imageClips, [])
+  assert.deepEqual(p.backgroundClips, [])
+  assert.deepEqual(p.audioClips, [])
+  assert.deepEqual(p.assets, {})
+})
+
 test('未知版本仍拒绝', () => {
   assert.throws(() => readProject({ version: 9, clips: [] }, models), /版本/)
 })

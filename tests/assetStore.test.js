@@ -45,6 +45,7 @@ test('拒绝不支持类型与超限文件', async () => {
   const store = createAssetStore(memoryBackend(), noProbe)
   await assert.rejects(() => store.importFile({ type: 'video/mp4', name: 'v.mp4', size: 10 }), /不支持/)
   await assert.rejects(() => store.importFile({ type: 'image/png', name: 'a.png', size: 65 * 1024 * 1024 }), /64MB/)
+  await assert.rejects(() => store.importFile({ type: 'audio/mpeg', name: 'a.mp3', size: 512 * 1024 * 1024 + 1 }), /512MB/)
 })
 
 test('按创建时间倒序列出', async () => {

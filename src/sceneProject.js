@@ -129,9 +129,13 @@ export function readProject(data, models) {
     return clip
   })
   for(const track of new Set(project.clips.map(c=>c.track))){const first=project.clips.find(c=>c.track===track);for(const clip of project.clips.filter(c=>c.track===track)){clip.layerName=first.layerName;clip.layerLocked=first.layerLocked;clip.layerHidden=first.layerHidden}}
-  project.imageClips = []
-  project.backgroundClips = []
-  project.audioClips = []
-  project.assets = {}
+  // v3 旧工程不含图片/背景/音频/素材集合；v4 的 imageClips/backgroundClips/audioClips/assets 的逐项解析
+  // 有意留待 M2/M4 在此处读取并校验，在此之前 v4 读取沿用 createProject() 的空默认值，故这里只对 v3 置空。
+  if (data.version === 3) {
+    project.imageClips = []
+    project.backgroundClips = []
+    project.audioClips = []
+    project.assets = {}
+  }
   return project
 }
