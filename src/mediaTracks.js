@@ -115,3 +115,67 @@ export function paintBackground(ctx, background, { width, height, bitmap, legacy
   ctx.fillRect(0, 0, width, height)
   return background?.kind === 'color' && background.color ? 'color' : 'fallback'
 }
+
+export const AUDIO_CLIP_LIMIT = 32
+export const AUDIO_TRACK_LIMIT = 8
+
+export function audioClipLimit(clips) {
+  return clips.length >= AUDIO_CLIP_LIMIT ? '单个工程最多 32 个音频片段' : ''
+}
+export function createAudioClip(asset, start = 0, duration = 5, track = 0) {
+  return {
+    id: uid('audio'), assetId: asset.id, name: asset.name || '音频', track: Math.max(0, Math.min(AUDIO_TRACK_LIMIT - 1, Math.round(track) || 0)),
+    start, duration, offset: 0, volume: 1, fadeIn: 0, fadeOut: 0,
+  }
+}
+export function audioClipsAtTime(clips, time) {
+  return (clips || []).filter(c => time >= c.start - 1e-9 && time < c.start + c.duration - 1e-9)
+}
+/** 音量曲线：淡入淡出按秒线性过渡，其余时间等于 volume，两者重叠时取较小值。 */
+export function audioGainAt(clip, time) {
+  const volume = Math.max(0, Math.min(1, clip.volume ?? 1))
+  const local = time - clip.start
+  const fadeIn = Math.max(0, clip.fadeIn || 0), fadeOut = Math.max(0, clip.fadeOut || 0)
+  let gain = volume
+  if (fadeIn > 0) gain = Math.min(gain, volume * Math.max(0, Math.min(1, local / fadeIn)))
+  if (fadeOut > 0) gain = Math.min(gain, volume * Math.max(0, Math.min(1, (clip.duration - local) / fadeOut)))
+  return Math.max(0, Math.min(1, gain))
+}
+/**
+ * 播放计划：给定播放头时间，算出这一刻要启动的音频源。
+ * 每个条目带素材内起播秒数（源偏移 + 已播放部分）、剩余时长与剩余淡入淡出窗口，
+ * 因此跳帧、循环回绕后重新计算即可，不依赖累计时间，不会漂移。
+ */
+export function planAudioPlayback(clips, time, fps = 30) {
+  return audioClipsAtTime(clips, time)
+    .slice()
+    .sort((a, b) => a.start - b.start || String(a.id).localeCompare(String(b.id)))
+    .map(clip => {
+      const elapsed = Math.max(0, time - clip.start)
+      const remaining = Math.max(0, clip.duration - elapsed)
+      return {
+        id: clip.id, assetId: clip.assetId, name: clip.name, track: clip.track,
+        offset: Math.max(0, (clip.offset || 0) + elapsed),
+        duration: remaining,
+        gain: audioGainAt(clip, time),
+        volume: Math.max(0, Math.min(1, clip.volume ?? 1)),
+        fadeIn: Math.max(0, Math.min(clip.fadeIn || 0, remaining)),
+        fadeOut: Math.max(0, Math.min(clip.fadeOut || 0, remaining)),
+      }
+    })
+}
+/** 复制音频片段：带走素材、时长、音量与淡入淡出；轨道与起点由粘贴时决定。 */
+export function audioClipTemplate(clip) {
+  return {
+    assetId: clip.assetId, name: clip.name, duration: clip.duration,
+    volume: clip.volume ?? 1, fadeIn: clip.fadeIn || 0, fadeOut: clip.fadeOut || 0, offset: clip.offset || 0,
+  }
+}
+export function createAudioClipFromTemplate(template, start = 0, duration = template.duration || 5, track = 0) {
+  const clip = createAudioClip({ id: template.assetId, name: template.name }, start, duration, track)
+  clip.volume = Math.max(0, Math.min(1, template.volume ?? 1))
+  clip.fadeIn = Math.max(0, Math.min(template.fadeIn || 0, duration))
+  clip.fadeOut = Math.max(0, Math.min(template.fadeOut || 0, duration))
+  clip.offset = Math.max(0, template.offset || 0)
+  return clip
+}
