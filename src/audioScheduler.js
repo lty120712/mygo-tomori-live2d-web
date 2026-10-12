@@ -35,7 +35,7 @@ export function createAudioScheduler(options = {}) {
   const decoding = new Map()
   const problems = new Set()
   let context = null, master = null, mixer = null, sources = []
-  let clips = []
+  let clips = [], trackState = {}
   let started = false
 
   function ensure() {
@@ -78,7 +78,7 @@ export function createAudioScheduler(options = {}) {
   async function play(time = 0) {
     await ensure()
     stopAll()
-    const plan = planAudioPlayback(clips, time)
+    const plan = planAudioPlayback(clips, time, { trackState })
     if (!plan.length) { started = true; return [] }
     const decoded = await Promise.all(plan.map(entry => buffer(entry.assetId)))
     if (!context) return []
@@ -116,8 +116,10 @@ export function createAudioScheduler(options = {}) {
     return play(time)
   }
 
-  function setClips(next) {
+  /** 片段表与轨道静音/独奏状态一起更新：两者都影响要启动哪些音源。 */
+  function setClips(next, state = {}) {
     clips = Array.isArray(next) ? next : []
+    trackState = state || {}
   }
 
   function destroy() {

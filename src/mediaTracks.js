@@ -18,7 +18,7 @@ export function createImageClip(asset, start = 0, duration = 5, track = 0) {
     width: asset.width, height: asset.height,
     transform: { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1 },
     keyframes: {}, params: {}, events: [],
-    layerName: asset.name, layerLocked: false, layerHidden: false,
+    layerName: asset.name, layerLocked: false, layerHidden: false, layerSolo: false,
   }
 }
 // A scale of 100% fits the original aspect ratio inside the 960×540 reference canvas.
@@ -39,18 +39,33 @@ export function backgroundClipLimit(clips) {
   return clips.length >= BACKGROUND_CLIP_LIMIT ? '单个工程最多 64 个背景片段' : ''
 }
 export function createColorBackgroundClip(color, start = 0, duration = 5) {
-  return { id: uid('bg'), kind: 'color', color: BACKGROUND_COLOR.test(color || '') ? color : '#00b140', assetId: '', name: '纯色背景', start, duration, fit: 'fill' }
+  return { id: uid('bg'), kind: 'color', color: BACKGROUND_COLOR.test(color || '') ? color : '#00b140', assetId: '', name: '纯色背景', start, duration, fit: 'fill', layerHidden: false, layerSolo: false }
 }
 export function createImageBackgroundClip(asset, start = 0, duration = 5) {
-  return { id: uid('bg'), kind: 'image', color: '', assetId: asset.id, name: asset.name || '背景图片', start, duration, fit: 'fill' }
+  return { id: uid('bg'), kind: 'image', color: '', assetId: asset.id, name: asset.name || '背景图片', start, duration, fit: 'fill', layerHidden: false, layerSolo: false }
 }
 /** 背景是全屏铺满的单层：有片段就按片段，其次 legacy 图片，最后工程纯色兜底。 */
 export function backgroundAtTime(clips, { color, image } = {}, time = 0) {
-  const clip = (clips || []).find(c => time >= c.start - 1e-9 && time < c.start + c.duration - 1e-9)
+  // 隐藏的背景轨道按「没有片段覆盖」处理，继续回退旧背景图与兜底色。
+  const clip = (clips || []).find(c => !c.layerHidden && time >= c.start - 1e-9 && time < c.start + c.duration - 1e-9)
   if (clip?.kind === 'image' && clip.assetId) return { kind: 'image', assetId: clip.assetId, name: clip.name }
   if (clip?.kind === 'color') return { kind: 'color', color: clip.color }
   if (image) return { kind: 'legacy-image', image }
   return { kind: 'color', color }
+}
+/**
+ * 视觉层可见性（模型 / 图片 / 背景共用一个规则）：
+ * 隐藏的轨道不画；任一视觉轨道（含背景）开启独见时，只画开启独见的轨道。
+ */
+export function visualLayerFilter(clips, backgroundClips = []) {
+  const tracks = new Set((clips || []).filter(c => c.layerSolo).map(c => c.track))
+  const background = (backgroundClips || []).some(c => c.layerSolo)
+  const solo = tracks.size > 0 || background
+  return {
+    solo,
+    clipVisible: clip => !solo || tracks.has(clip.track),
+    backgroundVisible: () => !solo || background,
+  }
 }
 /**
  * 添加背景片段：默认 5 秒，播放头到下一个片段或工程结尾不足 5 秒时自动填充剩余时长。
@@ -131,6 +146,14 @@ export function createAudioClip(asset, start = 0, duration = 5, track = 0) {
 export function audioClipsAtTime(clips, time) {
   return (clips || []).filter(c => time >= c.start - 1e-9 && time < c.start + c.duration - 1e-9)
 }
+/**
+ * 静音与独奏属于轨道而不是片段（空轨道也能静音），存在工程的 audioTrackState 里：
+ * `{ [track]: { muted, solo } }`。任一轨道独奏时只播独奏轨道，静音轨道始终不播。
+ */
+export function audibleAudioClips(clips, trackState = {}) {
+  const soloed = new Set(Object.entries(trackState || {}).filter(([, state]) => state?.solo).map(([track]) => Number(track)))
+  return (clips || []).filter(c => !trackState?.[c.track]?.muted && (!soloed.size || soloed.has(c.track)))
+}
 /** 音量曲线：淡入淡出按秒线性过渡，其余时间等于 volume，两者重叠时取较小值。 */
 export function audioGainAt(clip, time) {
   const volume = Math.max(0, Math.min(1, clip.volume ?? 1))
@@ -146,8 +169,8 @@ export function audioGainAt(clip, time) {
  * 每个条目带素材内起播秒数（源偏移 + 已播放部分）、剩余时长与剩余淡入淡出窗口，
  * 因此跳帧、循环回绕后重新计算即可，不依赖累计时间，不会漂移。
  */
-export function planAudioPlayback(clips, time, fps = 30) {
-  return audioClipsAtTime(clips, time)
+export function planAudioPlayback(clips, time, { trackState = {} } = {}) {
+  return audioClipsAtTime(audibleAudioClips(clips, trackState), time)
     .slice()
     .sort((a, b) => a.start - b.start || (a.track ?? 0) - (b.track ?? 0) || String(a.id).localeCompare(String(b.id)))
     .map(clip => {

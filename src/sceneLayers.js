@@ -20,6 +20,7 @@ export function setLayerState(clips,track,patch){
   for(const clip of clips.filter(c=>c.track===track)){
     if(typeof patch.layerLocked==='boolean')clip.layerLocked=patch.layerLocked
     if(typeof patch.layerHidden==='boolean')clip.layerHidden=patch.layerHidden
+    if(typeof patch.layerSolo==='boolean')clip.layerSolo=patch.layerSolo
   }
 }
 export function canEditClips(clips,ids){return ids.every(id=>{const clip=clips.find(c=>c.id===id);return !!clip && !clip.layerLocked})}

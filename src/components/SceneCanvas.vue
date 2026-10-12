@@ -21,7 +21,7 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import ClipRenderer from './ClipRenderer.vue'
-import { backgroundAtTime, isImageClip, paintBackground as paintSceneBackground, visualPose, imageDimensions } from '../mediaTracks.js'
+import { backgroundAtTime, isImageClip, paintBackground as paintSceneBackground, visualLayerFilter, visualPose, imageDimensions } from '../mediaTracks.js'
 import { createImageSources } from '../imageSources.js'
 import { assetStore } from '../assetStore.js'
 import {sceneDrawOrder,sceneHitOrder} from '../sceneLayers.js'
@@ -39,6 +39,8 @@ const images=createImageSources({blob:id=>assetStore.blob(id),changed:()=>{
 }})
 watch(()=>[...props.clips.filter(isImageClip).map(c=>c.assetId),...backgroundAssets.value],ids=>images.sync(ids),{immediate:true,flush:'sync'})
 const size=computed(()=>sceneSize(props.aspectRatio))
+// 隐藏与独见统一在这里判断：模型、图片、背景共用一套规则。
+const layerFilter=computed(()=>visualLayerFilter(props.clips,props.backgroundClips))
 const previewFit=ref('width')
 const manualZoom=ref(100)
 const panDrag=ref(null),viewPan=ref({x:0,y:0})
@@ -81,7 +83,7 @@ watch(()=>props.backgroundImage,src=>{
 function ready(id, runtime) { emit('ready', id, runtime) }
 function dispose(id) { emit('dispose', id) }
 function pose(clip) { return visualPose(clip, sampleClip(clip, props.time, props.fps, props.runtimes[clip.id]?.groups || []).transform) }
-const editableClips=computed(()=>props.clips.filter(c=>!c.layerLocked && clipVisible(c,props.time)))
+const editableClips=computed(()=>props.clips.filter(c=>!c.layerLocked && clipVisible(c,props.time) && layerFilter.value.clipVisible(c)))
 const selectionEntries=computed(()=>editableClips.value.filter(c=>(props.selectedIds || [props.selected?.id]).includes(c.id)).map(c=>({id:c.id,pose:pose(c)})))
 function poseBox(t){
   return {
@@ -205,10 +207,11 @@ function paint() {
   const ctx = canvas.value?.getContext('2d')
   if (ctx) {
     ctx.clearRect(0, 0, size.value.width, size.value.height)
-    const background=backgroundAtTime(props.backgroundClips,{color:props.background,image:props.backgroundImage},props.time)
+    const filter=layerFilter.value
+    const background=backgroundAtTime(filter.backgroundVisible() ? props.backgroundClips : [],{color:props.background,image:props.backgroundImage},props.time)
     paintSceneBackground(ctx,background,{width:size.value.width,height:size.value.height,bitmap:background.kind==='image' ? images.get(background.assetId) : null,legacyImage:backgroundImage,fallback:props.background})
     for (const clip of sceneDrawOrder(props.clips)) {
-      if (!clipVisible(clip, props.time)) continue
+      if (!clipVisible(clip, props.time) || !filter.clipVisible(clip)) continue
       if(isImageClip(clip)) {
         const source=images.get(clip.assetId)
         if(source){

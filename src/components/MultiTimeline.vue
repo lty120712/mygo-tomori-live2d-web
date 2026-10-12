@@ -10,7 +10,7 @@
     <div class="timeline-ruler"><span>轨道 / 片段</span><div ref="ruler" tabindex="-1" @pointerdown="beginSeek"><i v-for="n in ticks" :key="n" :style="{left: n / duration * 100 + '%'}">{{ formatTimecode(n,fps) }}</i><b v-if="snapTime!==null" class="snap-guide" :style="{left:snapTime/duration*100+'%'}"></b><b :style="{left: time / duration * 100 + '%'}" title="拖动播放头"></b></div></div>
     <div class="track-scroll">
       <template v-for="track in tracks" :key="track"><div class="track-row">
-        <div class="track-label track-card" tabindex="0" :data-track="track" title="单击展开／收起参数轨道；拖动调整图层顺序；双击名称重命名" :aria-expanded="selected?.track===track && showKeyRows" @pointerdown="beginLayerDrag($event,track)" :aria-label="'选择图层 '+layerName(track)" @contextmenu.prevent.stop="openTrackMenu($event,track)" @click="clickLayer(track)" @keydown.enter.prevent.stop="clickLayer(track)" :class="{active:clips.some(c=>c.track===track && selectedClips.includes(c.id)),'layer-locked':layerLocked(track),'layer-hidden':layerHidden(track),'layer-dragging':layerSource===track,'layer-target':layerTarget===track}"><span class="layer-name" :title="layerName(track)" @dblclick.stop="startLayerRename(track)"><i class="layer-grip" aria-hidden="true">⠿</i><input v-if="editingLayer===track" ref="layerNameInput" aria-label="图层名称" maxlength="100" v-model="layerDraft" @pointerdown.stop @click.stop @dblclick.stop @keydown.enter.prevent.stop="finishLayerRename" @keydown.esc.prevent.stop="editingLayer=null" @blur="finishLayerRename" /><template v-else>{{layerName(track)}}</template><small v-if="selected?.track===track" :title="selected.name">{{ selected.name }}</small></span><button class="layer-toggle" :disabled="disabled" :aria-label="(layerLocked(track) ? '解锁图层 ' : '锁定图层 ')+layerName(track)" :aria-pressed="layerLocked(track)" :title="layerLocked(track) ? '解锁图层' : '锁定图层'" @click.stop="toggleLayer(track,'layerLocked')"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2"/><path :d="layerLocked(track) ? 'M8 10V6a4 4 0 0 1 8 0v4' : 'M8 10V6a4 4 0 0 1 8 0'"/></svg></button><button class="layer-toggle" :disabled="disabled" :aria-label="(layerHidden(track) ? '显示图层 ' : '隐藏图层 ')+layerName(track)" :aria-pressed="layerHidden(track)" :title="layerHidden(track) ? '显示图层' : '隐藏图层'" @click.stop="toggleLayer(track,'layerHidden')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/><path v-if="layerHidden(track)" d="M3 3l18 18"/></svg></button><button v-if="selected?.track===track" :disabled="disabled || layerLocked(track)" :aria-label="'删除片段 '+selected.name" title="删除选中片段（Delete）" @click.stop="selectedClips.length ? deleteClips() : emit('delete-selected')">删除</button></div>
+        <div class="track-label track-card" tabindex="0" :data-track="track" title="单击展开／收起参数轨道；拖动调整图层顺序；双击名称重命名" :aria-expanded="selected?.track===track && showKeyRows" @pointerdown="beginLayerDrag($event,track)" :aria-label="'选择图层 '+layerName(track)" @contextmenu.prevent.stop="openTrackMenu($event,track)" @click="clickLayer(track)" @keydown.enter.prevent.stop="clickLayer(track)" :class="{active:clips.some(c=>c.track===track && selectedClips.includes(c.id)),'layer-locked':layerLocked(track),'layer-hidden':layerHidden(track),'layer-dragging':layerSource===track,'layer-target':layerTarget===track}"><span class="layer-name" :title="layerName(track)" @dblclick.stop="startLayerRename(track)"><i class="layer-grip" aria-hidden="true">⠿</i><input v-if="editingLayer===track" ref="layerNameInput" aria-label="图层名称" maxlength="100" v-model="layerDraft" @pointerdown.stop @click.stop @dblclick.stop @keydown.enter.prevent.stop="finishLayerRename" @keydown.esc.prevent.stop="editingLayer=null" @blur="finishLayerRename" /><template v-else>{{layerName(track)}}</template><small v-if="selected?.track===track" :title="selected.name">{{ selected.name }}</small></span><button class="layer-toggle" :disabled="disabled" :aria-label="(layerLocked(track) ? '解锁图层 ' : '锁定图层 ')+layerName(track)" :aria-pressed="layerLocked(track)" :title="layerLocked(track) ? '解锁图层' : '锁定图层'" @click.stop="toggleLayer(track,'layerLocked')"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2"/><path :d="layerLocked(track) ? 'M8 10V6a4 4 0 0 1 8 0v4' : 'M8 10V6a4 4 0 0 1 8 0'"/></svg></button><button class="layer-toggle" :disabled="disabled" :aria-label="(layerHidden(track) ? '显示图层 ' : '隐藏图层 ')+layerName(track)" :aria-pressed="layerHidden(track)" :title="layerHidden(track) ? '显示图层' : '隐藏图层'" @click.stop="toggleLayer(track,'layerHidden')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/><path v-if="layerHidden(track)" d="M3 3l18 18"/></svg></button><button class="layer-toggle layer-solo" :disabled="disabled" :aria-label="(layerSolo(track) ? '取消独见 ' : '独见 ')+layerName(track)" :aria-pressed="layerSolo(track)" :title="layerSolo(track) ? '取消独见' : '独见：只显示该轨道'" @click.stop="toggleLayer(track,'layerSolo')">独</button><button v-if="selected?.track===track" :disabled="disabled || layerLocked(track)" :aria-label="'删除片段 '+selected.name" title="删除选中片段（Delete）" @click.stop="selectedClips.length ? deleteClips() : emit('delete-selected')">删除</button></div>
         <div class="track-lane" tabindex="-1" @pointerdown.self="boxMode ? beginBox($event,'clips') : beginTrackSeek($event,track)" @contextmenu.prevent.stop="openTrackMenu($event,track)">
           <div v-for="clip in clips.filter(c => c.track === track)" :key="clip.id" class="model-clip" tabindex="0" :aria-label="'选择片段 '+clip.name" :class="{selected: selectedClips.includes(clip.id),multiselected:selectedClips.includes(clip.id),'image-clip':isImageClip(clip)}" :data-clip-id="clip.id" @contextmenu.prevent.stop="openClipMenu($event,clip)" :style="{left: clip.start / duration * 100 + '%', width: clip.duration / duration * 100 + '%'}" @click="chooseClip(clip,$event)" @pointerdown="begin($event,clip,'move')" @pointermove="move" @pointerup="end" @pointercancel="end" @lostpointercapture="end">
             <span class="trim-handle left" title="裁剪入点" @pointerdown.stop="begin($event,clip,'left')"></span>
@@ -28,12 +28,12 @@
       </template>
       <div class="track-row background-track">
         <div class="track-label track-card" title="背景始终位于最底层，按时间切换纯色或图片">
-          <span class="layer-name">背景<small v-if="!backgroundClips.length"> · 兜底</small></span>
+          <span class="layer-name">背景<small v-if="!backgroundClips.length"> · 兜底</small></span><button class="layer-toggle" :disabled="disabled" :aria-label="(backgroundHidden ? '显示背景轨道' : '隐藏背景轨道')" :aria-pressed="backgroundHidden" :title="backgroundHidden ? '显示背景轨道' : '隐藏背景轨道（画面回退到兜底背景）'" @click="toggleBackgroundTrack('layerHidden')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/><path v-if="backgroundHidden" d="M3 3l18 18"/></svg></button><button class="layer-toggle layer-solo" :disabled="disabled" :aria-label="(backgroundSolo ? '取消独见背景' : '独见背景')" :aria-pressed="backgroundSolo" :title="backgroundSolo ? '取消独见' : '独见：只显示背景轨道'" @click="toggleBackgroundTrack('layerSolo')">独</button>
           <button :disabled="disabled" title="选择颜色，在播放头添加纯色背景片段" @click="openBackgroundColorMenu">＋纯色</button>
           <button :disabled="disabled" title="从素材库选择图片，在播放头添加背景片段" @click="openBackgroundImageMenu">＋图片</button>
         </div>
         <div class="track-lane background-lane" tabindex="-1" @pointerdown.self="clickBackgroundLane($event)" @contextmenu.prevent.stop="openBackgroundMenu($event,null)">
-          <div v-for="clip in backgroundClips" :key="clip.id" class="model-clip background-clip" tabindex="0" :class="{selected:backgroundSelection===clip.id,multiselected:backgroundSelection===clip.id,image:clip.kind==='image'}" :aria-label="'背景片段 '+backgroundLabel(clip)" :title="backgroundTitle(clip)+' · 拖动移动；左右拖动两端裁剪；右键编辑'" :style="{left:clip.start/duration*100+'%',width:clip.duration/duration*100+'%',background:clip.kind==='color' ? clip.color : undefined}" @pointerdown="beginBackground($event,clip,'move')" @pointermove="moveBackground" @pointerup="endBackground" @pointercancel="endBackground" @lostpointercapture="endBackground" @contextmenu.prevent.stop="openBackgroundMenu($event,clip)">
+          <div v-for="clip in backgroundClips" :key="clip.id" class="model-clip background-clip" tabindex="0" :class="{selected:backgroundSelection===clip.id,multiselected:backgroundSelection===clip.id,image:clip.kind==='image',hidden:clip.layerHidden}" :aria-label="'背景片段 '+backgroundLabel(clip)" :title="backgroundTitle(clip)+' · 拖动移动；左右拖动两端裁剪；右键编辑'" :style="{left:clip.start/duration*100+'%',width:clip.duration/duration*100+'%',background:clip.kind==='color' ? clip.color : undefined}" @pointerdown="beginBackground($event,clip,'move')" @pointermove="moveBackground" @pointerup="endBackground" @pointercancel="endBackground" @lostpointercapture="endBackground" @contextmenu.prevent.stop="openBackgroundMenu($event,clip)">
             <span class="trim-handle left" title="调整背景入点" @pointerdown.stop="beginBackground($event,clip,'left')"></span>
             <span class="clip-name">{{backgroundLabel(clip)}}</span><small>{{formatTimecode(clip.duration,fps)}}</small>
             <span class="trim-handle right" title="调整背景出点" @pointerdown.stop="beginBackground($event,clip,'right')"></span>
@@ -43,11 +43,11 @@
       </div>
       <div v-for="lane in audioTracks" :key="'audio-'+lane" class="track-row audio-track">
         <div class="track-label track-card" :title="'音频轨道 '+(lane+1)+'：同轨道片段不能重叠，不同轨道可同时出声'">
-          <span class="layer-name">音频 {{ lane + 1 }}<small v-if="!clipsOnAudioTrack(lane).length"> · 空</small></span>
+          <span class="layer-name">音频 {{ lane + 1 }}<small v-if="!clipsOnAudioTrack(lane).length"> · 空</small></span><button class="layer-toggle" :disabled="disabled" :aria-label="(audioTrackMuted(lane) ? '取消静音 音频 ' + (lane+1) : '静音 音频 ' + (lane+1))" :aria-pressed="audioTrackMuted(lane)" :title="audioTrackMuted(lane) ? '取消静音' : '静音这条音频轨道'" @click="toggleAudioTrack(lane,'muted')">静</button><button class="layer-toggle layer-solo" :disabled="disabled" :aria-label="(audioTrackSoloed(lane) ? '取消独奏 音频 ' + (lane+1) : '独奏 音频 ' + (lane+1))" :aria-pressed="audioTrackSoloed(lane)" :title="audioTrackSoloed(lane) ? '取消独奏' : '独奏：只播这条音频轨道'" @click="toggleAudioTrack(lane,'solo')">独</button>
           <button :disabled="disabled" title="选择或导入音频，在播放头添加片段" @click="openAudioAddMenu($event,lane)">＋音频</button>
         </div>
         <div class="track-lane audio-lane" tabindex="-1" @pointerdown.self="clickAudioLane($event)" @contextmenu.prevent.stop="openAudioAddMenu($event,lane)">
-          <div v-for="clip in clipsOnAudioTrack(lane)" :key="clip.id" class="model-clip audio-clip" tabindex="0" :class="{selected:audioSelection===clip.id,multiselected:audioSelection===clip.id}" :aria-label="'音频片段 '+clip.name" :title="audioTitle(clip)" :style="{left:clip.start/duration*100+'%',width:clip.duration/duration*100+'%'}" @contextmenu.prevent.stop="openAudioMenu($event,clip)" @pointerdown="beginAudio($event,clip,'move')" @pointermove="moveAudio" @pointerup="endAudio" @pointercancel="endAudio" @lostpointercapture="endAudio">
+          <div v-for="clip in clipsOnAudioTrack(lane)" :key="clip.id" class="model-clip audio-clip" tabindex="0" :class="{selected:audioSelection===clip.id,multiselected:audioSelection===clip.id,muted:clip.muted}" :aria-label="'音频片段 '+clip.name" :title="audioTitle(clip)" :style="{left:clip.start/duration*100+'%',width:clip.duration/duration*100+'%'}" @contextmenu.prevent.stop="openAudioMenu($event,clip)" @pointerdown="beginAudio($event,clip,'move')" @pointermove="moveAudio" @pointerup="endAudio" @pointercancel="endAudio" @lostpointercapture="endAudio">
             <span class="trim-handle left" title="调整音频入点" @pointerdown.stop="beginAudio($event,clip,'left')"></span>
             <span class="clip-name">{{clip.name}}</span><small>{{formatTimecode(clip.duration,fps)}}</small>
             <span class="trim-handle right" title="调整音频出点" @pointerdown.stop="beginAudio($event,clip,'right')"></span>
@@ -170,8 +170,8 @@ import { formatTimecode } from '../timecode.js'
 import { editTimelineClip,timelineTicks } from '../timelineEditing.js'
 import { assetStore } from '../assetStore.js'
 import { groupedClipKeys,visibleClipKeys,uniqueKeyRefs,planKeyRefMove } from '../timelineKeyframes.js'
-const props=defineProps({clips:Array,backgroundClips:{type:Array,default:()=>[]},audioClips:{type:Array,default:()=>[]},selectedIds:Array,duration:Number,fps:Number,time:Number,selectedId:String,selected:Object,labels:Object,pose:Object,runtimes:Object,transformFields:Array,disabled:Boolean,navigationDisabled:Boolean})
-const emit=defineEmits(['selection-change','clear-selection','batch-clips','batch-keys','select','seek','layer-state','rename-layer','reorder-layer','edit-clip','remove-key','move-key','toggle-key','edit-key-value','edit-event','paste-event','remove-event','begin-edit','end-edit','delete-selected','add-background-color','background-edit','delete-background','background-image','import-background-image','paste-background','add-audio','import-audio','audio-edit','delete-audio','paste-audio'])
+const props=defineProps({clips:Array,backgroundClips:{type:Array,default:()=>[]},audioClips:{type:Array,default:()=>[]},audioTrackState:{type:Object,default:()=>({})},selectedIds:Array,duration:Number,fps:Number,time:Number,selectedId:String,selected:Object,labels:Object,pose:Object,runtimes:Object,transformFields:Array,disabled:Boolean,navigationDisabled:Boolean})
+const emit=defineEmits(['selection-change','clear-selection','batch-clips','batch-keys','select','seek','layer-state','background-track-state','audio-track-state','rename-layer','reorder-layer','edit-clip','remove-key','move-key','toggle-key','edit-key-value','edit-event','paste-event','remove-event','begin-edit','end-edit','delete-selected','add-background-color','background-edit','delete-background','background-image','import-background-image','paste-background','add-audio','import-audio','audio-edit','delete-audio','paste-audio'])
 const timelineRoot=ref(null),scrollArea=ref(null),ruler=ref(null),selectedKeys=ref([]),boxMode=ref(true),boxRect=ref(null),menu=ref(null),menuValue=ref(0),menuNativeValue=ref(0),menuTime=ref(0),menuEasing=ref('linear')
 const curveEdit=ref(null)
 const menuPreset=computed({get:()=>typeof menuEasing.value==='object' ? 'custom' : menuEasing.value,set:value=>{if(value==='custom')openCurveEditor();else menuEasing.value=value}})
@@ -201,6 +201,22 @@ const splitCount=computed(()=>props.clips.filter(c=>selectedClips.value.includes
 const menuLocked=computed(()=>props.disabled || (menu.value?.track!=null ? layerLocked(menu.value.track) : menu.value?.kind==='keys' ? refsLocked(selectedKeys.value) : !!props.selected?.layerLocked))
 function layerLocked(track){return !!props.clips.find(c=>c.track===track)?.layerLocked}
 function layerHidden(track){return !!props.clips.find(c=>c.track===track)?.layerHidden}
+function layerSolo(track){return !!props.clips.find(c=>c.track===track)?.layerSolo}
+const backgroundHidden=computed(()=>props.backgroundClips.some(c=>c.layerHidden))
+const backgroundSolo=computed(()=>props.backgroundClips.some(c=>c.layerSolo))
+const backgroundSoloActive=computed(()=>backgroundSolo.value || props.clips.some(c=>c.layerSolo))
+function toggleBackgroundTrack(key){
+  if(props.disabled)return
+  const current=key==='layerHidden' ? backgroundHidden.value : backgroundSolo.value
+  emit('background-track-state',{[key]:!current})
+}
+function audioTrackMuted(track){return props.audioTrackState?.[track]?.muted === true}
+function audioTrackSoloed(track){return props.audioTrackState?.[track]?.solo === true}
+function toggleAudioTrack(track,key){
+  if(props.disabled)return
+  const current=key==='muted' ? audioTrackMuted(track) : audioTrackSoloed(track)
+  emit('audio-track-state',track,{[key]:!current})
+}
 function toggleLayer(track,key){if(props.disabled)return;stopFrameStep();selectedKeys.value=[];selectedEventId.value='';selectedClips.value=[];emit('layer-state',track,{[key]:!props.clips.find(c=>c.track===track)?.[key]})}
 const selectedEvent=computed(()=>props.selected?.events.find(e=>e.id===selectedEventId.value))
 const pastePlan=computed(()=>planKeyPaste(props.clips,keyClipboard.value,props.selectedId,props.time,props.fps,Object.fromEntries(Object.entries(props.runtimes || {}).map(([id,r])=>[id,r.groups]))))
@@ -383,10 +399,10 @@ const audioSelection=ref(''),audioClipboard=ref(null)
 const audioMenuVolume=ref(100),audioMenuFadeIn=ref(0),audioMenuFadeOut=ref(0)
 const audioTracks=computed(()=>{
   const used=[...new Set(props.audioClips.map(c=>c.track))].sort((a,b)=>a-b)
-  if(!used.length)return [0]
-  // 始终多留一条空轨，方便把片段放到新轨道上叠放
-  const extra=used.at(-1)+1
-  return extra < AUDIO_TRACK_LIMIT ? [...used,extra] : used
+  // 始终多留一条空轨，方便把片段放到新轨道上叠放；没有任何片段时也能直接选第 2 条轨道
+  const rows=used.length ? used : [0]
+  const extra=rows.at(-1)+1
+  return extra < AUDIO_TRACK_LIMIT ? [...rows,extra] : rows
 })
 function clipsOnAudioTrack(track){return props.audioClips.filter(c=>c.track===track)}
 function audioTitle(clip){
@@ -531,4 +547,6 @@ function applyBackgroundColor(e){backgroundMenuColor.value=e.target.value;if(men
 .audio-track .track-label { gap:6px; }.audio-track .layer-name { color:var(--editor-param); }
 .audio-track .track-label button { padding:4px 7px!important; }
 .audio-clip { background:var(--editor-motion); }
+.layer-solo { font-size:10px!important; line-height:1!important; }
+.background-clip.hidden,.audio-clip.muted { opacity:.45; }
 </style>

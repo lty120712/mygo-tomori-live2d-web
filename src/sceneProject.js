@@ -11,12 +11,12 @@ export function uid(prefix = 'clip') {
   return prefix + '-' + crypto.randomUUID()
 }
 export function createProject() {
-  return { version: SCENE_VERSION, aspectRatio:'16:9', fps: 30, duration: 10, background: '#00b140', backgroundImage: '', backgroundImageName: '', clips: [], imageClips: [], backgroundClips: [], audioClips: [], assets: {} }
+  return { version: SCENE_VERSION, aspectRatio:'16:9', fps: 30, duration: 10, background: '#00b140', backgroundImage: '', backgroundImageName: '', clips: [], imageClips: [], backgroundClips: [], audioClips: [], audioTrackState: {}, assets: {} }
 }
 export function createClip(model, start = 0, duration = 5, track = 0) {
   return {
     id: uid(), model: model.category + '/' + model.name, entry: model.entry || 'model.json',
-    name: model.name, layerName:model.name, layerLocked:false, layerHidden:false, track, start, duration, offset: 0,
+    name: model.name, layerName:model.name, layerLocked:false, layerHidden:false, layerSolo:false, track, start, duration, offset: 0,
     transform: { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1 },
     mouseTrack: true, params: {}, keyframes: {}, events: [],
   }
@@ -106,6 +106,7 @@ export function readProject(data, models) {
     clip.mouseTrack = raw.mouseTrack !== false
     clip.layerLocked = raw.layerLocked === true
     clip.layerHidden = raw.layerHidden === true
+    clip.layerSolo = raw.layerSolo === true
     clip.track = Math.round(number(raw.track, index, 0, 79))
     clip.start = number(raw.start, 0, 0, project.duration - 1 / project.fps)
     clip.duration = number(raw.duration, project.duration - clip.start, 1 / project.fps, project.duration - clip.start)
@@ -142,6 +143,7 @@ export function readProject(data, models) {
       clip.layerName = typeof raw.layerName === 'string' && raw.layerName.trim() ? raw.layerName.trim().slice(0,100) : clip.name
       clip.layerLocked = raw.layerLocked === true
       clip.layerHidden = raw.layerHidden === true
+      clip.layerSolo = raw.layerSolo === true
       for (const [key, min, max] of [['x', -1920, 1920], ['y', -1080, 1080], ['scale', .1, 5], ['rotation', -180, 180], ['opacity', 0, 1]]) {
         clip.transform[key] = number(raw.transform?.[key], clip.transform[key], min, max)
         for (const k of Array.isArray(raw.keyframes?.['@'+key]) ? raw.keyframes['@'+key] : []) {
@@ -153,6 +155,14 @@ export function readProject(data, models) {
       }
       return clip
     })
+  }
+  if (data.version === 4 && data.audioTrackState != null) {
+    if (typeof data.audioTrackState !== 'object' || Array.isArray(data.audioTrackState)) throw new Error('音频轨道状态无效')
+    for (const [key, state] of Object.entries(data.audioTrackState)) {
+      const track = Number(key)
+      if (!Number.isInteger(track) || track < 0 || track >= AUDIO_TRACK_LIMIT || !state || typeof state !== 'object') continue
+      project.audioTrackState[track] = { muted: state.muted === true, solo: state.solo === true }
+    }
   }
   if (data.version === 4 && data.backgroundClips != null) {
     if (!Array.isArray(data.backgroundClips)) throw new Error('背景片段列表无效')
@@ -166,6 +176,8 @@ export function readProject(data, models) {
         : createColorBackgroundClip(raw.color)
       clip.start = number(raw.start, 0, 0, project.duration - 1 / project.fps)
       clip.duration = number(raw.duration, project.duration - clip.start, 1 / project.fps, project.duration - clip.start)
+      clip.layerHidden = raw.layerHidden === true
+      clip.layerSolo = raw.layerSolo === true
       return clip
     })
   }

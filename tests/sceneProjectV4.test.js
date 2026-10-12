@@ -106,3 +106,21 @@ test('v3 旧工程没有音频片段', () => {
   const parsed = readProject({ version: 3, aspectRatio: '16:9', fps: 30, duration: 10, clips: [] }, [])
   assert.deepEqual(parsed.audioClips, [])
 })
+
+test('v4 读写轨道开关：视觉独见、背景隐藏与独见、音频轨道静音与独奏', () => {
+  const project = createProject()
+  project.clips.push({ model: 'tomori/chika', name: 'chika', track: 0, start: 0, duration: 5, layerSolo: true, layerHidden: true })
+  project.imageClips.push({ assetId: 'x', layerSolo: true })
+  project.backgroundClips.push({ kind: 'color', color: '#123456', start: 0, duration: 4, layerHidden: true, layerSolo: true })
+  project.audioClips.push({ assetId: 'song', name: '配乐', start: 0, duration: 4, track: 1 })
+  project.audioTrackState = { 1: { muted: true, solo: true }, 3: { muted: false, solo: false }, 9: { muted: true } }
+  const parsed = readProject(JSON.parse(JSON.stringify(project)), models)
+  assert.equal(parsed.clips[0].layerSolo, true)
+  assert.equal(parsed.clips[0].layerHidden, true)
+  assert.equal(parsed.imageClips[0].layerSolo, true)
+  assert.equal(parsed.backgroundClips[0].layerHidden, true)
+  assert.equal(parsed.backgroundClips[0].layerSolo, true)
+  // 轨道号超出范围的状态被丢弃
+  assert.deepEqual(parsed.audioTrackState, { 1: { muted: true, solo: true }, 3: { muted: false, solo: false } })
+  assert.throws(() => readProject({ ...createProject(), audioTrackState: [] }, []), /音频轨道状态无效/)
+})

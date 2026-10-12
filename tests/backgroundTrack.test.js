@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { BACKGROUND_CLIP_LIMIT, backgroundClipLimit, backgroundAtTime, backgroundClipTemplate, backgroundGaps, createClipFromTemplate, createColorBackgroundClip, createImageBackgroundClip, planBackgroundAdd, migrateLegacyBackground, paintBackground } from '../src/mediaTracks.js'
+import { BACKGROUND_CLIP_LIMIT, backgroundClipLimit, backgroundAtTime, backgroundClipTemplate, backgroundGaps, createClipFromTemplate, createColorBackgroundClip, createImageBackgroundClip, planBackgroundAdd, migrateLegacyBackground, paintBackground, visualLayerFilter } from '../src/mediaTracks.js'
 import { planClipMove, applyClipStarts } from '../src/clipSelection.js'
 import { createProject } from '../src/sceneProject.js'
 
@@ -8,8 +8,8 @@ const asset = { id: 'bg-image', name: '天空.png', kind: 'image' }
 
 test('背景片段保存类型、素材引用与全屏铺满标记，不占视觉图层', () => {
   const color = createColorBackgroundClip('#123456', 2, 4), image = createImageBackgroundClip(asset, 0, 10)
-  assert.deepEqual({ ...color, id: undefined }, { id: undefined, kind: 'color', color: '#123456', assetId: '', name: '纯色背景', start: 2, duration: 4, fit: 'fill' })
-  assert.deepEqual({ ...image, id: undefined }, { id: undefined, kind: 'image', color: '', assetId: 'bg-image', name: '天空.png', start: 0, duration: 10, fit: 'fill' })
+  assert.deepEqual({ ...color, id: undefined }, { id: undefined, kind: 'color', color: '#123456', assetId: '', name: '纯色背景', start: 2, duration: 4, fit: 'fill', layerHidden: false, layerSolo: false })
+  assert.deepEqual({ ...image, id: undefined }, { id: undefined, kind: 'image', color: '', assetId: 'bg-image', name: '天空.png', start: 0, duration: 10, fit: 'fill', layerHidden: false, layerSolo: false })
   assert.equal(color.track, undefined)
   assert.notEqual(color.id, image.id)
   assert.equal(createColorBackgroundClip('red').color, '#00b140')
@@ -141,4 +141,30 @@ test('复制背景片段带走外观与原时长，粘贴按播放头落位并�
   const plan = planBackgroundAdd([createColorBackgroundClip('#111111', 2, 2)], createClipFromTemplate(colorTemplate, 0), { duration: 10, fps: 30, preferred: colorTemplate.duration })
   assert.equal(plan.clip.duration, 2)
   assert.equal(plan.clip.color, '#1050d0')
+})
+
+test('隐藏的背景轨道按没有片段处理，继续回退旧背景图与兜底色', () => {
+  const hidden = { ...createColorBackgroundClip('#123456', 0, 5), layerHidden: true }
+  assert.deepEqual(backgroundAtTime([hidden], { color: '#00b140' }, 1), { kind: 'color', color: '#00b140' })
+  assert.deepEqual(backgroundAtTime([hidden], { color: '#00b140', image: 'data:image/png;base64,AA' }, 1), { kind: 'legacy-image', image: 'data:image/png;base64,AA' })
+  assert.deepEqual(backgroundAtTime([hidden, { ...createImageBackgroundClip(asset, 0, 5), layerHidden: true }], { color: '#00b140' }, 1), { kind: 'color', color: '#00b140' })
+})
+
+test('视觉可见性：没有独见时全部显示，任一轨道独见时只显示独见轨道（含背景）', () => {
+  const clips = [{ id: 'm0', track: 0 }, { id: 'm1', track: 1 }]
+  const plain = visualLayerFilter(clips, [{ id: 'bg' }])
+  assert.equal(plain.solo, false)
+  assert.equal(plain.clipVisible({ track: 0 }), true)
+  assert.equal(plain.backgroundVisible(), true)
+
+  const soloTrack = visualLayerFilter([{ id: 'm0', track: 0 }, { id: 'm1', track: 1, layerSolo: true }], [{ id: 'bg' }])
+  assert.equal(soloTrack.solo, true)
+  assert.equal(soloTrack.clipVisible({ track: 0 }), false)
+  assert.equal(soloTrack.clipVisible({ track: 1 }), true)
+  assert.equal(soloTrack.backgroundVisible(), false)
+
+  const soloBackground = visualLayerFilter(clips, [{ id: 'bg', layerSolo: true }])
+  assert.equal(soloBackground.solo, true)
+  assert.equal(soloBackground.clipVisible({ track: 0 }), false)
+  assert.equal(soloBackground.backgroundVisible(), true)
 })
