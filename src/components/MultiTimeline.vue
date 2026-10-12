@@ -3,6 +3,7 @@
     <div class="timeline-resizer" role="separator" aria-orientation="horizontal" aria-label="调整时间线高度" tabindex="0" title="向上拖动展开时间线，向下拖动扩大画布" @pointerdown="beginResize" @pointermove.stop="resizeTimeline" @pointerup="endResize" @pointercancel="endResize" @lostpointercapture="endResize" @keydown.up.prevent="timelineHeight=Math.min(maxHeight(),timelineHeight+20)" @keydown.down.prevent="timelineHeight=Math.max(minimumTimelineHeight,timelineHeight-20)"><span></span></div>
     <div class="timeline-tools"><div class="tool-group" role="group" aria-label="时间线选择"><span>时间线</span><button :aria-pressed="boxMode" title="轨道空白处框选片段；菱形所在区域框选关键帧；Ctrl / Shift 追加选择" @click="boxMode=!boxMode">框选</button></div><div class="tool-group context-tools" role="group" aria-label="所选片段操作"><template v-if="selectedEvent"><span :title="selectedEvent.name">已选{{selectedEvent.type==='motion' ? '动作' : '表情'}}</span><button :disabled="disabled" @click="copyEvent">复制片段</button><button :disabled="editDisabled || !eventClipboard" @click="pasteCopiedEvent">粘贴片段</button><button :disabled="editDisabled" @click="deleteEvent">删除片段</button></template><template v-if="selectedClips.length || clipClipboard"><span v-if="selectedClips.length">已选 {{selectedClips.length}} 个片段</span><button :disabled="disabled || !selectedClips.length" @click="copyModels">复制片段</button><button :disabled="disabled || !clipClipboard" @click="pasteModels">粘贴片段</button><button v-if="selectedClips.length" :disabled="disabled" @click="deleteClips">删除所选片段</button></template></div><div v-if="selectedKeys.length || keyClipboard" class="tool-group" role="group" aria-label="关键帧复制粘贴"><span v-if="selectedKeys.length" title="← / → 移动选中帧；长按连续移动；拖动任意选中菱形整体移动">已选 {{selectedKeys.length}} 帧</span><button :disabled="disabled || !selectedKeys.length" @click="copySelection" title="复制所选关键帧（Ctrl+C / ⌘C）">复制帧</button><button :disabled="editDisabled || !keyClipboard" @click="pasteSelection" :title="pastePlan.error || '粘贴到播放头（Ctrl+V / ⌘V）；同属性同帧会替换'">粘贴帧</button><button v-if="selectedKeys.length" :disabled="disabled || refsLocked(selectedKeys)" @click="deleteSelection">删除选中帧</button></div><div class="tool-group zoom-tools" role="group" aria-label="时间线视图"><button aria-label="缩小时间线" :disabled="zoomLevel===0 || !!dragging" @click="changeZoom(zoomLevel-1)">−</button><input aria-label="时间线缩放" type="range" min="0" max="4" step="1" :value="zoomLevel" :disabled="dragging" @input="changeZoom(Number($event.target.value))" /><button aria-label="放大时间线" :disabled="zoomLevel===4 || !!dragging" @click="changeZoom(zoomLevel+1)">＋</button><span>{{zoom}}×</span><button :disabled="zoomLevel===0 || !!dragging" @click="changeZoom(0)">适合全长</button><label title="拖动时按住 Alt 临时关闭吸附"><input type="checkbox" role="switch" aria-label="时间线吸附" v-model="snapping" />吸附</label><small title="拖动时按住 Alt 临时关闭吸附；Ctrl + 滚轮缩放">Alt · Ctrl + 滚轮</small></div></div>
     <div v-if="backgroundSelection" class="timeline-tools background-tools"><div class="tool-group" role="group" aria-label="所选背景片段操作"><span>已选 1 个背景片段</span><button :disabled="disabled" title="复制所选背景片段（Ctrl+C）" @click="copyBackgroundClip()">复制片段</button><button :disabled="editDisabled || !backgroundClipboard" title="粘贴到播放头（Ctrl+V）" @click="pasteBackgroundClip()">粘贴片段</button><button :disabled="disabled" @click="deleteBackgroundSelection()">删除所选片段</button></div></div>
+    <div v-if="audioSelection" class="timeline-tools audio-tools"><div class="tool-group" role="group" aria-label="所选音频片段操作"><span>已选 1 个音频片段</span><button :disabled="disabled" title="复制所选音频片段（Ctrl+C）" @click="copyAudioClip()">复制片段</button><button :disabled="editDisabled || !audioClipboard" title="粘贴到播放头（Ctrl+V）" @click="pasteAudioClip()">粘贴片段</button><button :disabled="disabled" @click="deleteAudioSelection()">删除所选片段</button></div></div>
     <div v-if="clipboardNotice" class="clipboard-notice" role="status" :title="clipboardNotice">{{clipboardNotice}}</div>
     <div v-if="selected" class="key-tools"><div class="tool-group" role="group" aria-label="关键帧属性选择"><button :aria-expanded="showKeyRows" @click="showKeyRows=!showKeyRows">{{showKeyRows ? '收起关键帧' : '展开关键帧'}}</button><select aria-label="关键帧属性" v-model="keyProperty"><option v-for="key in keyProperties" :key="key" :value="key">{{labels[key] || key}} · {{(selected.keyframes[key] || []).length}} 帧</option></select></div><div class="tool-group" role="group" aria-label="关键帧编辑"><button aria-label="上一个关键帧" :disabled="disabled || !previousKey" @click="chooseKey(previousKey)">‹</button><button aria-label="添加或删除当前关键帧" :class="{keyed:currentKey}" :disabled="editDisabled || !withinClip" @click="emit('toggle-key',keyProperty)">◆</button><button aria-label="下一个关键帧" :disabled="disabled || !nextKey" @click="chooseKey(nextKey)">›</button><label>{{labels[keyProperty] || keyProperty}}{{ valueDisplay(keyProperty).unit }}<input aria-label="关键帧属性值" type="number" :min="valueDisplay(keyProperty).min" :max="valueDisplay(keyProperty).max" step="1" :value="valueDisplay(keyProperty).toDisplay(propertyValue)" :disabled="editDisabled || !withinClip" @focus="emit('begin-edit')" @blur="$event.target.value=valueDisplay(keyProperty).toDisplay(propertyValue);emit('end-edit')" @input="emit('edit-key-value',keyProperty,valueDisplay(keyProperty).toNative($event.target.value))" /></label><button :disabled="editDisabled || !currentKey" @click="emit('remove-key',keyProperty,currentFrame)">删除关键帧</button><button :disabled="editDisabled || (!selectedKeys.length && !currentKey)" @click="openCurveEditor">速度曲线</button></div><small class="neighbor-description" :title="neighborDescription">{{neighborDescription}}</small></div>
     <div ref="scrollArea" class="timeline-scroll" @wheel="wheelZoom"><div class="timeline-content" :style="{width: (170+laneWidth)+'px'}">
@@ -40,7 +41,21 @@
           <b v-if="snapTime!==null" class="snap-guide" :style="{left:snapTime/duration*100+'%'}"></b><b class="playhead" :style="{left:time/duration*100+'%'}"></b>
         </div>
       </div>
-      <div v-if="!clips.length && !backgroundClips.length" class="timeline-empty">添加模型或图片后，每个片段都会拥有独立轨道</div>
+      <div v-for="lane in audioTracks" :key="'audio-'+lane" class="track-row audio-track">
+        <div class="track-label track-card" :title="'音频轨道 '+(lane+1)+'：同轨道片段不能重叠，不同轨道可同时出声'">
+          <span class="layer-name">音频 {{ lane + 1 }}<small v-if="!clipsOnAudioTrack(lane).length"> · 空</small></span>
+          <button :disabled="disabled" title="选择或导入音频，在播放头添加片段" @click="openAudioAddMenu($event,lane)">＋音频</button>
+        </div>
+        <div class="track-lane audio-lane" tabindex="-1" @pointerdown.self="clickAudioLane($event)" @contextmenu.prevent.stop="openAudioAddMenu($event,lane)">
+          <div v-for="clip in clipsOnAudioTrack(lane)" :key="clip.id" class="model-clip audio-clip" tabindex="0" :class="{selected:audioSelection===clip.id,multiselected:audioSelection===clip.id}" :aria-label="'音频片段 '+clip.name" :title="audioTitle(clip)" :style="{left:clip.start/duration*100+'%',width:clip.duration/duration*100+'%'}" @contextmenu.prevent.stop="openAudioMenu($event,clip)" @pointerdown="beginAudio($event,clip,'move')" @pointermove="moveAudio" @pointerup="endAudio" @pointercancel="endAudio" @lostpointercapture="endAudio">
+            <span class="trim-handle left" title="调整音频入点" @pointerdown.stop="beginAudio($event,clip,'left')"></span>
+            <span class="clip-name">{{clip.name}}</span><small>{{formatTimecode(clip.duration,fps)}}</small>
+            <span class="trim-handle right" title="调整音频出点" @pointerdown.stop="beginAudio($event,clip,'right')"></span>
+          </div>
+          <b v-if="snapTime!==null" class="snap-guide" :style="{left:snapTime/duration*100+'%'}"></b><b class="playhead" :style="{left:time/duration*100+'%'}"></b>
+        </div>
+      </div>
+      <div v-if="!clips.length && !backgroundClips.length && !audioClips.length" class="timeline-empty">添加模型或图片后，每个片段都会拥有独立轨道</div>
     </div></div></div>
     <Teleport to="body"><div v-if="boxRect" class="key-marquee" :style="boxRect"></div><div v-if="menu" class="timeline-menu" role="menu" :aria-label="menu.title" :style="{left:menu.x+'px',top:menu.y+'px'}" @keydown.esc.prevent.stop="closeMenu" @keydown="selectionShortcut" @contextmenu.prevent>
       <strong :title="menu.title">{{menu.title}}</strong><small v-if="menuLocked" class="menu-status">图层已锁定，解锁后可编辑</small>
@@ -115,6 +130,26 @@
         <span v-if="!(menu.assets || []).length" class="menu-hint">素材库里还没有图片，可以先导入一张。</span>
         <button role="menuitem" :disabled="disabled" @click="importBackgroundImage">导入新图片…</button>
       </template>
+      <template v-else-if="menu.kind==='audio-add'">
+        <span class="menu-section">添加音频 · 轨道 {{ (menu.track ?? 0) + 1 }} · {{formatTimecode(props.time,props.fps)}} 起</span>
+        <button v-for="asset in (menu.assets || [])" :key="asset.id" role="menuitem" :disabled="disabled" @click="addAudioClip(asset,menu.track)">{{asset.name}}<span class="menu-hint">{{asset.duration ? asset.duration.toFixed(1)+' 秒' : ''}}</span></button>
+        <span v-if="!(menu.assets || []).length" class="menu-hint">素材库里还没有音频，可以先导入一段。</span>
+        <button role="menuitem" :disabled="disabled" @click="importAudio(menu.track)">导入新音频…</button>
+      </template>
+      <template v-else-if="menu.kind==='audio' && menu.audio">
+        <fieldset class="menu-edit-fields" :disabled="disabled">
+          <label>音量 %<input aria-label="音频音量" type="number" min="0" max="100" step="1" v-model.number="audioMenuVolume" /></label>
+          <label>淡入 秒<input aria-label="音频淡入" type="number" min="0" step="0.1" v-model.number="audioMenuFadeIn" /></label>
+          <label>淡出 秒<input aria-label="音频淡出" type="number" min="0" step="0.1" v-model.number="audioMenuFadeOut" /></label>
+          <button role="menuitem" @click="applyAudioMenu">应用音量与淡入淡出</button>
+        </fieldset>
+        <span class="menu-section">音频片段 · {{menu.audio.name}}</span>
+        <button role="menuitem" :disabled="disabled" @click="copyAudioClip()">复制音频片段<kbd>Ctrl+C</kbd></button>
+        <button role="menuitem" :disabled="disabled || !audioClipboard" @click="pasteAudioClip()">粘贴音频片段<kbd>Ctrl+V</kbd></button>
+        <button role="menuitem" :disabled="disabled" @click="emit('audio-edit',menu.audio.id,{start:props.time});closeMenu()">移动到播放头</button>
+        <button role="menuitem" :disabled="disabled" @click="emit('audio-edit',menu.audio.id,{duration:props.duration-menu.audio.start});closeMenu()">延伸到工程结尾</button>
+        <button role="menuitem" class="menu-delete" :disabled="disabled" @click="emit('delete-audio',menu.audio.id);closeMenu()">删除音频片段</button>
+      </template>
       <small class="menu-footer">修改可撤销 <kbd>Ctrl+Z</kbd> · 关闭 <kbd>Esc</kbd></small>
     </div></Teleport>
     <Teleport to="body"><KeyframeCurveEditor v-if="curveEdit" :value="curveEdit.easing" :description="curveEdit.description" :disabled="disabled || !curveEdit.refs.length || refsLocked(curveEdit.refs)" @apply="applyCurve" @cancel="closeCurve" /></Teleport>
@@ -124,7 +159,7 @@
 import { ref,computed,watch,nextTick,onMounted,onBeforeUnmount } from 'vue'
 import KeyframeCurveEditor from './KeyframeCurveEditor.vue'
 import {EASING_PRESETS,normalizeEasing,easingLabel} from '../keyframeEasing.js'
-import { backgroundClipTemplate, isImageClip } from '../mediaTracks.js'
+import { AUDIO_TRACK_LIMIT, audioClipTemplate, backgroundClipTemplate, isImageClip } from '../mediaTracks.js'
 import {copyClips,planClipMove,planClipSplit} from '../clipSelection.js'
 import { eventRange,eventProgress,planEventEdit } from '../timelineEvents.js'
 import { copyKeyRefs,planKeyPaste } from '../keyframeClipboard.js'
@@ -135,8 +170,8 @@ import { formatTimecode } from '../timecode.js'
 import { editTimelineClip,timelineTicks } from '../timelineEditing.js'
 import { assetStore } from '../assetStore.js'
 import { groupedClipKeys,visibleClipKeys,uniqueKeyRefs,planKeyRefMove } from '../timelineKeyframes.js'
-const props=defineProps({clips:Array,backgroundClips:{type:Array,default:()=>[]},selectedIds:Array,duration:Number,fps:Number,time:Number,selectedId:String,selected:Object,labels:Object,pose:Object,runtimes:Object,transformFields:Array,disabled:Boolean,navigationDisabled:Boolean})
-const emit=defineEmits(['selection-change','clear-selection','batch-clips','batch-keys','select','seek','layer-state','rename-layer','reorder-layer','edit-clip','remove-key','move-key','toggle-key','edit-key-value','edit-event','paste-event','remove-event','begin-edit','end-edit','delete-selected','add-background-color','background-edit','delete-background','background-image','import-background-image','paste-background'])
+const props=defineProps({clips:Array,backgroundClips:{type:Array,default:()=>[]},audioClips:{type:Array,default:()=>[]},selectedIds:Array,duration:Number,fps:Number,time:Number,selectedId:String,selected:Object,labels:Object,pose:Object,runtimes:Object,transformFields:Array,disabled:Boolean,navigationDisabled:Boolean})
+const emit=defineEmits(['selection-change','clear-selection','batch-clips','batch-keys','select','seek','layer-state','rename-layer','reorder-layer','edit-clip','remove-key','move-key','toggle-key','edit-key-value','edit-event','paste-event','remove-event','begin-edit','end-edit','delete-selected','add-background-color','background-edit','delete-background','background-image','import-background-image','paste-background','add-audio','import-audio','audio-edit','delete-audio','paste-audio'])
 const timelineRoot=ref(null),scrollArea=ref(null),ruler=ref(null),selectedKeys=ref([]),boxMode=ref(true),boxRect=ref(null),menu=ref(null),menuValue=ref(0),menuNativeValue=ref(0),menuTime=ref(0),menuEasing=ref('linear')
 const curveEdit=ref(null)
 const menuPreset=computed({get:()=>typeof menuEasing.value==='object' ? 'custom' : menuEasing.value,set:value=>{if(value==='custom')openCurveEditor();else menuEasing.value=value}})
@@ -155,7 +190,7 @@ function closeCurve(){curveEdit.value=null;nextTick(()=>timelineRoot.value?.focu
 const selectedClips=ref([...(props.selectedIds || [])]),clipClipboard=ref(null)
 watch(()=>props.selectedIds,ids=>{if(JSON.stringify(ids)!==JSON.stringify(selectedClips.value)){selectedClips.value=[...(ids || [])];clearDetails()}},{flush:'sync'})
 watch(selectedClips,ids=>{if(JSON.stringify(ids)!==JSON.stringify(props.selectedIds))emit('selection-change',ids)},{flush:'sync'})
-function clearDetails(){stopFrameStep();selectedKeys.value=[];selectedEventId.value='';backgroundSelection.value='';closeMenu()}
+function clearDetails(){stopFrameStep();selectedKeys.value=[];selectedEventId.value='';backgroundSelection.value='';audioSelection.value='';closeMenu()}
 function clearSelection(){clearDetails();selectedClips.value=[];emit('clear-selection')}
 defineExpose({modelShortcut,copyKeyEvent,pasteKeyEvent,clearDetails,clearSelection})
 const keyClipboard=ref(null),clipboardNotice=ref(''),selectedEventId=ref(''),eventClipboard=ref(null),eventMenuStart=ref(0),eventMenuDuration=ref(0),eventMenuOffset=ref(0)
@@ -173,6 +208,7 @@ function copySelection(){if(props.disabled || !selectedKeys.value.length)return;
 function pasteSelection(){if(editDisabled.value || !keyClipboard.value)return;stopFrameStep();const plan=pastePlan.value;if(plan.error){clipboardNotice.value=plan.error;closeMenu();return}selectedClips.value=[];emit('batch-keys',[],{type:'paste',entries:plan.entries});selectedKeys.value=plan.entries.map(({clipId,key,frame})=>({clipId,key,frame}));const first=plan.entries.find(e=>e.clipId===props.selectedId);if(first)keyProperty.value=first.key;showKeyRows.value=true;clipboardNotice.value='已粘贴 '+plan.entries.length+' 帧';closeMenu();timelineRoot.value?.focus({preventScroll:true})}
 function chooseClip(clip,e){
   backgroundSelection.value=''
+  audioSelection.value=''
   if(props.disabled || clip.layerLocked)return
   selectedKeys.value=[];selectedEventId.value=''
   if(e?.ctrlKey || e?.metaKey || e?.shiftKey)selectedClips.value=selectedClips.value.includes(clip.id) ? selectedClips.value.filter(id=>id!==clip.id) : [...selectedClips.value,clip.id]
@@ -198,12 +234,18 @@ function modelShortcut(e){
     }
     return true
   }
+  if((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && ((key==='c' && audioSelection.value) || (key==='v' && audioClipboard.value))){
+    e.preventDefault();e.stopPropagation()
+    if(!e.repeat)key==='c' ? copyAudioClip() : pasteAudioClip()
+    return true
+  }
   if(e.key==='Delete' && selectedClips.value.length && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey){e.preventDefault();e.stopPropagation();if(!e.repeat)deleteClips();return true}
   if(e.key==='Delete' && backgroundSelection.value && !selectedClips.value.length && !selectedKeys.value.length && !selectedEvent.value && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey){e.preventDefault();e.stopPropagation();if(!e.repeat)deleteBackgroundSelection();return true}
+  if(e.key==='Delete' && audioSelection.value && !selectedClips.value.length && !selectedKeys.value.length && !selectedEvent.value && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey){e.preventDefault();e.stopPropagation();if(!e.repeat)deleteAudioSelection();return true}
   return false
 }
-function copyKeyEvent(e){if(e.target.closest('input,select,textarea,[contenteditable]') || props.disabled)return;if(selectedClips.value.length){e.preventDefault();copyModels()}else if(selectedEvent.value){e.preventDefault();copyEvent()}else if(selectedKeys.value.length){e.preventDefault();copySelection();e.clipboardData?.setData('text/plain',JSON.stringify({type:'tomori-keyframes',...keyClipboard.value}))}else if(backgroundSelection.value){e.preventDefault();copyBackgroundClip()}}
-function pasteKeyEvent(e){if(e.target.closest('input,select,textarea,[contenteditable]') || props.disabled)return;if(clipClipboard.value){e.preventDefault();pasteModels()}else if(eventClipboard.value && !selectedKeys.value.length){e.preventDefault();pasteCopiedEvent()}else if(keyClipboard.value){e.preventDefault();pasteSelection()}else if(backgroundClipboard.value){e.preventDefault();pasteBackgroundClip()}}
+function copyKeyEvent(e){if(e.target.closest('input,select,textarea,[contenteditable]') || props.disabled)return;if(selectedClips.value.length){e.preventDefault();copyModels()}else if(selectedEvent.value){e.preventDefault();copyEvent()}else if(selectedKeys.value.length){e.preventDefault();copySelection();e.clipboardData?.setData('text/plain',JSON.stringify({type:'tomori-keyframes',...keyClipboard.value}))}else if(backgroundSelection.value){e.preventDefault();copyBackgroundClip()}else if(audioSelection.value){e.preventDefault();copyAudioClip()}}
+function pasteKeyEvent(e){if(e.target.closest('input,select,textarea,[contenteditable]') || props.disabled)return;if(clipClipboard.value){e.preventDefault();pasteModels()}else if(eventClipboard.value && !selectedKeys.value.length){e.preventDefault();pasteCopiedEvent()}else if(keyClipboard.value){e.preventDefault();pasteSelection()}else if(backgroundClipboard.value){e.preventDefault();pasteBackgroundClip()}else if(audioClipboard.value){e.preventDefault();pasteAudioClip()}}
 const isKeySelected=(clipId,key,frame)=>selectedKeys.value.some(k=>k.clipId===clipId && k.key===key && k.frame===frame)
 function selectKeys(items,e){selectedClips.value=[];selectedEventId.value='';if(e?.shiftKey || e?.ctrlKey || e?.metaKey){const all=items.every(k=>isKeySelected(k.clipId,k.key,k.frame));selectedKeys.value=all ? selectedKeys.value.filter(k=>!items.some(i=>i.clipId===k.clipId && i.key===k.key && i.frame===k.frame)) : uniqueKeyRefs([...selectedKeys.value,...items])}else if(!items.every(k=>isKeySelected(k.clipId,k.key,k.frame)))selectedKeys.value=uniqueKeyRefs(items)}
 function deleteSelection(){if(props.disabled || refsLocked(selectedKeys.value) || !selectedKeys.value.length)return;emit('batch-keys',selectedKeys.value,{type:'delete'});selectedKeys.value=[]}
@@ -213,10 +255,10 @@ function endFrameStep(e){if(e.key===frameStepKey)stopFrameStep()}
 function moveFrame(key){if(props.navigationDisabled || dragging.value || box || menu.value){stopFrameStep();return}const direction=key==='ArrowLeft' ? -1 : 1;if(selectedKeys.value.length){if(props.disabled || refsLocked(selectedKeys.value)){stopFrameStep();return}const refs=selectedKeys.value,plan=planKeyRefMove(props.clips,refs,direction,props.fps);if(plan.delta){selectedKeys.value=plan.items;emit('batch-keys',refs,{type:'move',delta:plan.delta})}}else emit('seek',stepFrameTime(props.time,props.fps,direction,props.duration))}
 function startFrameStep(key){stopFrameStep();timelineRoot.value?.focus({preventScroll:true});frameStepKey=key;if(selectedKeys.value.length && !props.disabled){keyStepEditing=true;emit('begin-edit')}moveFrame(key);if(!frameStepKey)return;frameStepTimer=setTimeout(()=>{moveFrame(key);if(frameStepKey)frameStepTimer=setInterval(()=>moveFrame(key),40)},350)}
 function focusTimeline(e){if(!e.target.closest('input,select,textarea,[contenteditable]'))timelineRoot.value?.focus({preventScroll:true})}
-function selectionShortcut(e){if(modelShortcut(e))return;if(e.defaultPrevented || e.isComposing || e.target.closest('input,select,textarea,[contenteditable]'))return;if((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && ['c','v'].includes(e.key.toLowerCase())){const copy=e.key.toLowerCase()==='c';if(selectedEvent.value || (eventClipboard.value && !selectedKeys.value.length)){e.preventDefault();e.stopPropagation();if(!e.repeat)(copy ? copyEvent() : pasteCopiedEvent())}else if(copy ? selectedKeys.value.length : keyClipboard.value){e.preventDefault();e.stopPropagation();if(!e.repeat)(copy ? copySelection() : pasteSelection())}return}if(['ArrowLeft','ArrowRight'].includes(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && !menu.value){e.preventDefault();e.stopPropagation();if(!e.repeat)startFrameStep(e.key);return}if(e.key==='Delete' && (selectedEvent.value || selectedKeys.value.length)){e.preventDefault();e.stopPropagation();selectedEvent.value ? deleteEvent() : deleteSelection()}else if(e.key==='Escape'){e.stopPropagation();closeMenu();selectedKeys.value=[];selectedEventId.value='';backgroundSelection.value=''}}
+function selectionShortcut(e){if(modelShortcut(e))return;if(e.defaultPrevented || e.isComposing || e.target.closest('input,select,textarea,[contenteditable]'))return;if((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && ['c','v'].includes(e.key.toLowerCase())){const copy=e.key.toLowerCase()==='c';if(selectedEvent.value || (eventClipboard.value && !selectedKeys.value.length)){e.preventDefault();e.stopPropagation();if(!e.repeat)(copy ? copyEvent() : pasteCopiedEvent())}else if(copy ? selectedKeys.value.length : keyClipboard.value){e.preventDefault();e.stopPropagation();if(!e.repeat)(copy ? copySelection() : pasteSelection())}return}if(['ArrowLeft','ArrowRight'].includes(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && !menu.value){e.preventDefault();e.stopPropagation();if(!e.repeat)startFrameStep(e.key);return}if(e.key==='Delete' && (selectedEvent.value || selectedKeys.value.length)){e.preventDefault();e.stopPropagation();selectedEvent.value ? deleteEvent() : deleteSelection()}else if(e.key==='Escape'){e.stopPropagation();closeMenu();selectedKeys.value=[];selectedEventId.value='';backgroundSelection.value='';audioSelection.value=''}}
 watch(()=>props.clips,()=>{selectedClips.value=selectedClips.value.filter(id=>props.clips.some(c=>c.id===id && !c.layerLocked));selectedKeys.value=selectedKeys.value.filter(i=>props.clips.find(c=>c.id===i.clipId)?.keyframes[i.key]?.some(k=>k.frame===i.frame))},{deep:true})
 let box=null
-function beginBox(e,kind='keys'){if(props.disabled || e.button!==0)return;selectedEventId.value='';backgroundSelection.value='';closeMenu();timelineRoot.value.focus({preventScroll:true});if(kind==='clips')selectedKeys.value=[];box={kind,x:e.clientX,y:e.clientY,base:e.shiftKey || e.ctrlKey || e.metaKey ? (kind==='clips' ? [...selectedClips.value] : [...selectedKeys.value]) : []};e.currentTarget.setPointerCapture(e.pointerId);e.preventDefault();updateBox(e)}
+function beginBox(e,kind='keys'){if(props.disabled || e.button!==0)return;selectedEventId.value='';backgroundSelection.value='';audioSelection.value='';closeMenu();timelineRoot.value.focus({preventScroll:true});if(kind==='clips')selectedKeys.value=[];box={kind,x:e.clientX,y:e.clientY,base:e.shiftKey || e.ctrlKey || e.metaKey ? (kind==='clips' ? [...selectedClips.value] : [...selectedKeys.value]) : []};e.currentTarget.setPointerCapture(e.pointerId);e.preventDefault();updateBox(e)}
 function updateBox(e){if(!box)return;const left=Math.min(box.x,e.clientX),top=Math.min(box.y,e.clientY),right=Math.max(box.x,e.clientX),bottom=Math.max(box.y,e.clientY);boxRect.value={left:left+'px',top:top+'px',width:right-left+'px',height:bottom-top+'px'};if(box.kind==='clips'){const ids=[],viewport=scrollArea.value.getBoundingClientRect();for(const el of timelineRoot.value.querySelectorAll('.model-clip[data-clip-id]')){const r=el.getBoundingClientRect(),c=props.clips.find(c=>c.id===el.dataset.clipId);if(!c?.layerLocked && Math.min(r.right,viewport.right)>=Math.max(left,viewport.left+170,r.left) && Math.min(r.bottom,viewport.bottom)>=Math.max(top,viewport.top+30,r.top) && r.left<=right && r.top<=bottom)ids.push(c.id)}selectedClips.value=[...new Set([...box.base,...ids])];return}if(Math.hypot(e.clientX-box.x,e.clientY-box.y)<3)return;selectedClips.value=[];const items=[];for(const el of timelineRoot.value.querySelectorAll('[data-key-items]')){const r=el.getBoundingClientRect(),viewport=scrollArea.value.getBoundingClientRect();if(r.right>=left && r.left<=right && r.bottom>=top && r.top<=bottom && r.right>viewport.left+170 && r.left<viewport.right && r.top>=viewport.top+30 && r.bottom<=viewport.bottom)items.push(...JSON.parse(el.dataset.keyItems))}selectedKeys.value=uniqueKeyRefs([...box.base,...items]).filter(item=>!props.clips.find(c=>c.id===item.clipId)?.layerLocked)}
 function endBox(){if(box?.kind==='clips'){if(selectedClips.value.length)emit('select',selectedClips.value[0]);else emit('clear-selection')}box=null;boxRect.value=null}
 function allRefs(clips,key){return clips.flatMap(c=>Object.entries(c.keyframes).filter(([id])=>!key || id===key).flatMap(([id,keys])=>keys.map(k=>({clipId:c.id,key:id,frame:k.frame}))))}
@@ -279,7 +321,7 @@ function resizeTimeline(e){if(resizing)timelineHeight.value=Math.max(minimumTime
 function endResize(){resizing=null}
 async function changeZoom(level,clientX){if(dragging.value || scrubbing)return;const viewport=scrollArea.value,oldWidth=laneWidth.value,anchor=clientX==null ? Math.max(0,(viewport.clientWidth-170)/2) : Math.max(0,clientX-viewport.getBoundingClientRect().left-170),fraction=(viewport.scrollLeft+anchor)/oldWidth;zoomLevel.value=Math.max(0,Math.min(4,level));await nextTick();viewport.scrollLeft=Math.max(0,fraction*laneWidth.value-anchor)}
 function wheelZoom(e){if(e.ctrlKey || e.metaKey){e.preventDefault();changeZoom(zoomLevel.value+(e.deltaY<0?1:-1),e.clientX)}}
-function selectTrack(track,at=props.time){selectedClips.value=[];selectedKeys.value=[];selectedEventId.value='';backgroundSelection.value='';if(props.disabled)return;const clips=props.clips.filter(c=>c.track===track).sort((a,b)=>a.start-b.start),active=clips.find(c=>at>=c.start && at<c.start+c.duration),clip=active || clips.find(c=>c.id===props.selectedId) || clips.reduce((nearest,c)=>{const distance=v=>Math.max(v.start-at,at-v.start-v.duration,0);return !nearest || distance(c)<distance(nearest) ? c : nearest},null);if(clip){selectedClips.value=clip.layerLocked ? [] : [clip.id];emit('select',clip.id)}}
+function selectTrack(track,at=props.time){selectedClips.value=[];selectedKeys.value=[];selectedEventId.value='';backgroundSelection.value='';audioSelection.value='';if(props.disabled)return;const clips=props.clips.filter(c=>c.track===track).sort((a,b)=>a.start-b.start),active=clips.find(c=>at>=c.start && at<c.start+c.duration),clip=active || clips.find(c=>c.id===props.selectedId) || clips.reduce((nearest,c)=>{const distance=v=>Math.max(v.start-at,at-v.start-v.duration,0);return !nearest || distance(c)<distance(nearest) ? c : nearest},null);if(clip){selectedClips.value=clip.layerLocked ? [] : [clip.id];emit('select',clip.id)}}
 function beginTrackSeek(e,track){if(props.disabled || e.button!==0)return;const r=e.currentTarget.getBoundingClientRect();selectTrack(track,Math.max(0,Math.min(props.duration,(e.clientX-r.left)/r.width*props.duration)));beginSeek(e)}
 function globalTime(frame){return props.selected.start+frame/props.fps-props.selected.offset}
 function visibleEvents(type){return props.selected.events.filter(e=>e.type===type && eventRange(props.selected,e,props.fps).duration>0)}
@@ -330,13 +372,80 @@ function addBackgroundColor(color){if(props.disabled || !color)return;emit('add-
 function addBackgroundImage(asset){if(props.disabled || !asset)return;emit('background-image',asset);closeMenu()}
 function importBackgroundImage(){if(props.disabled)return;emit('import-background-image');closeMenu()}
 let backgroundDrag=null
-function beginBackground(e,clip,mode){if(props.disabled || e.button!==0 || e.ctrlKey || e.metaKey || e.shiftKey)return;closeMenu();selectedClips.value=[];selectedKeys.value=[];selectedEventId.value='';backgroundSelection.value=clip.id;emit('begin-edit');dragging.value=true;backgroundDrag={original:{...clip},mode,x:e.clientX,start:clip.start,duration:clip.duration,offset:0,width:e.currentTarget.closest('.track-lane').clientWidth,scrollLeft:scrollArea.value.scrollLeft};timelineRoot.value.setPointerCapture(e.pointerId);e.preventDefault()}
+function beginBackground(e,clip,mode){if(props.disabled || e.button!==0 || e.ctrlKey || e.metaKey || e.shiftKey)return;closeMenu();selectedClips.value=[];selectedKeys.value=[];selectedEventId.value='';audioSelection.value='';backgroundSelection.value=clip.id;emit('begin-edit');dragging.value=true;backgroundDrag={original:{...clip},mode,x:e.clientX,start:clip.start,duration:clip.duration,offset:0,width:e.currentTarget.closest('.track-lane').clientWidth,scrollLeft:scrollArea.value.scrollLeft};timelineRoot.value.setPointerCapture(e.pointerId);e.preventDefault()}
 function moveBackground(e){if(!backgroundDrag)return;const d=backgroundDrag,width=Math.max(1,d.width),delta=(e.clientX-d.x+scrollArea.value.scrollLeft-d.scrollLeft)/width*props.duration,tolerance=8/width*props.duration,targets=snapping.value && !e.altKey ? [0,props.duration,props.time,...props.backgroundClips.filter(c=>c.id!==d.original.id).flatMap(c=>[c.start,c.start+c.duration])] : [];if(d.mode==='move'){const plan=planClipMove(props.backgroundClips,[d.original],delta,{duration:props.duration,fps:props.fps,targets,tolerance});snapTime.value=plan.snapTime;if(plan.entries.length)emit('background-edit',d.original.id,{start:plan.entries[0].start});return}const result=editTimelineClip(d,delta,{duration:props.duration,fps:props.fps,targets,tolerance});snapTime.value=result.snapTime;emit('background-edit',d.original.id,{start:result.patch.start,duration:result.patch.duration})}
 // 点选后保留选中状态，Delete 才能作用在它上面（拖动移动不改选中）。
 function endBackground(){if(backgroundDrag)emit('end-edit');backgroundDrag=null;dragging.value=false;snapTime.value=null}
 function deleteBackgroundSelection(){if(props.disabled || !backgroundSelection.value)return false;emit('delete-background',backgroundSelection.value);backgroundSelection.value='';return true}
 function clickBackgroundLane(e){backgroundSelection.value='';beginSeek(e)}
 const backgroundClipboard=ref(null)
+const audioSelection=ref(''),audioClipboard=ref(null)
+const audioMenuVolume=ref(100),audioMenuFadeIn=ref(0),audioMenuFadeOut=ref(0)
+const audioTracks=computed(()=>{
+  const used=[...new Set(props.audioClips.map(c=>c.track))].sort((a,b)=>a-b)
+  if(!used.length)return [0]
+  // 始终多留一条空轨，方便把片段放到新轨道上叠放
+  const extra=used.at(-1)+1
+  return extra < AUDIO_TRACK_LIMIT ? [...used,extra] : used
+})
+function clipsOnAudioTrack(track){return props.audioClips.filter(c=>c.track===track)}
+function audioTitle(clip){
+  const parts=[formatTimecode(clip.start,props.fps)+' → '+formatTimecode(clip.start+clip.duration,props.fps),'音量 '+Math.round((clip.volume ?? 1)*100)+'%']
+  if(clip.fadeIn)parts.push('淡入 '+clip.fadeIn.toFixed(1)+' 秒')
+  if(clip.fadeOut)parts.push('淡出 '+clip.fadeOut.toFixed(1)+' 秒')
+  return clip.name+' · '+parts.join(' · ')+' · 拖动移动；两端裁剪；右键编辑'
+}
+const audioAssetList=()=>assetStore.list().then(list=>list.filter(asset=>asset.kind==='audio')).catch(()=>[])
+async function openAudioAddMenu(e,track){if(props.disabled)return;positionMenu(e,{kind:'audio-add',track,title:'添加音频',assets:await audioAssetList()})}
+function addAudioClip(asset,track){if(props.disabled || !asset)return;emit('add-audio',asset,track);closeMenu()}
+function importAudio(track){if(props.disabled)return;emit('import-audio',track);closeMenu()}
+function openAudioMenu(e,clip){if(props.disabled)return;audioSelection.value=clip.id;audioMenuVolume.value=Math.round((clip.volume ?? 1)*100);audioMenuFadeIn.value=clip.fadeIn || 0;audioMenuFadeOut.value=clip.fadeOut || 0;positionMenu(e,{kind:'audio',title:'音频片段 · '+clip.name,audio:clip})}
+function applyAudioMenu(){
+  const clip=menu.value?.audio
+  if(!clip)return
+  emit('audio-edit',clip.id,{volume:Math.max(0,Math.min(1,Number(audioMenuVolume.value)/100)),fadeIn:Math.max(0,Number(audioMenuFadeIn.value)||0),fadeOut:Math.max(0,Number(audioMenuFadeOut.value)||0)})
+  closeMenu()
+}
+function clickAudioLane(e){audioSelection.value='';beginSeek(e)}
+let audioDrag=null
+function beginAudio(e,clip,mode){if(props.disabled || e.button!==0 || e.ctrlKey || e.metaKey || e.shiftKey)return;closeMenu();selectedClips.value=[];selectedKeys.value=[];selectedEventId.value='';backgroundSelection.value='';audioSelection.value=clip.id;emit('begin-edit');dragging.value=true;audioDrag={original:{...clip},mode,x:e.clientX,start:clip.start,duration:clip.duration,offset:clip.offset,width:e.currentTarget.closest('.track-lane').clientWidth,scrollLeft:scrollArea.value.scrollLeft};timelineRoot.value.setPointerCapture(e.pointerId);e.preventDefault()}
+function moveAudio(e){
+  if(!audioDrag)return
+  const d=audioDrag,width=Math.max(1,d.width),delta=(e.clientX-d.x+scrollArea.value.scrollLeft-d.scrollLeft)/width*props.duration,tolerance=8/width*props.duration
+  const targets=snapping.value && !e.altKey ? [0,props.duration,props.time,...props.audioClips.filter(c=>c.id!==d.original.id).flatMap(c=>[c.start,c.start+c.duration])] : []
+  if(d.mode==='move'){
+    const plan=planClipMove(props.audioClips,[d.original],delta,{duration:props.duration,fps:props.fps,targets,tolerance})
+    snapTime.value=plan.snapTime
+    if(plan.entries.length)emit('audio-edit',d.original.id,{start:plan.entries[0].start})
+    return
+  }
+  const result=editTimelineClip(d,delta,{duration:props.duration,fps:props.fps,targets,tolerance})
+  snapTime.value=result.snapTime
+  emit('audio-edit',d.original.id,{start:result.patch.start,duration:result.patch.duration,offset:result.patch.offset})
+}
+function endAudio(){if(audioDrag)emit('end-edit');audioDrag=null;dragging.value=false;snapTime.value=null}
+function deleteAudioSelection(){if(props.disabled || !audioSelection.value)return false;emit('delete-audio',audioSelection.value);audioSelection.value='';return true}
+function copyAudioClip(){
+  const clip=props.audioClips.find(c=>c.id===audioSelection.value)
+  if(props.disabled || !clip)return false
+  audioClipboard.value=audioClipTemplate(clip)
+  clipClipboard.value=null;keyClipboard.value=null;eventClipboard.value=null;backgroundClipboard.value=null
+  clipboardNotice.value='已复制音频片段：'+clip.name
+  closeMenu()
+  return true
+}
+async function pasteAudioClip(){
+  if(props.disabled || !audioClipboard.value)return false
+  clipClipboard.value=null;keyClipboard.value=null;eventClipboard.value=null;backgroundClipboard.value=null
+  const before=new Set(props.audioClips.map(c=>c.id))
+  emit('paste-audio',audioClipTemplate(audioClipboard.value))
+  clipboardNotice.value='已粘贴音频片段'
+  closeMenu()
+  await nextTick()
+  const added=props.audioClips.find(c=>!before.has(c.id))
+  audioSelection.value=added ? added.id : ''
+  return true
+}
 function copyBackgroundClip(){
   const clip=props.backgroundClips.find(c=>c.id===backgroundSelection.value)
   if(props.disabled || !clip)return false
@@ -419,4 +528,7 @@ function applyBackgroundColor(e){backgroundMenuColor.value=e.target.value;if(men
 .background-clip { background-image:repeating-linear-gradient(45deg,#00000014 0 6px,transparent 6px 12px); }
 .background-clip .clip-name { text-shadow:0 1px 2px #ffffffaa; }
 .timeline-menu .menu-hint { color:var(--editor-muted); font-size:11px; padding:4px 2px; line-height:1.5; }
+.audio-track .track-label { gap:6px; }.audio-track .layer-name { color:var(--editor-param); }
+.audio-track .track-label button { padding:4px 7px!important; }
+.audio-clip { background:var(--editor-motion); }
 </style>

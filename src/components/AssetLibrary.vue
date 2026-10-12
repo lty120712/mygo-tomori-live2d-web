@@ -39,6 +39,7 @@
             <span class="model-copy"><strong>{{ a.name }}</strong><small>{{ formatSize(a.size) }}<template v-if="a.kind==='audio' && a.duration"> · {{ a.duration.toFixed(1) }}s</template></small></span>
             <button v-if="a.kind==='image'" :disabled="disabled" :aria-label="'添加图片 '+a.name" title="添加图片片段到播放头" @click="emit('add-image',a)">＋</button>
             <button v-if="a.kind==='image'" :disabled="disabled" :aria-label="'把 '+a.name+' 设为背景'" title="添加背景片段到播放头" @click="emit('background-image',a)">背景</button>
+            <button v-if="a.kind==='audio'" :disabled="disabled" :aria-label="'把 '+a.name+' 加到音频轨道'" title="添加音频片段到播放头" @click="emit('add-audio',a)">轨道</button>
             <button class="media-delete" :disabled="disabled || referenced(a)" :aria-label="'删除素材 '+a.name" :title="referenced(a) ? '请先移除工程中引用该素材的片段' : '删除素材'" @click="removeAsset(a)">×</button>
           </div>
           <div v-if="!currentAssets.length" class="library-empty"><span>还没有{{ activeTab==='image' ? '图片' : '音频' }}素材</span><button @click="pickFile">导入一个</button></div>
@@ -54,7 +55,7 @@ import ModelPortrait from './ModelPortrait.vue'
 import { describeModel, filterModelLibrary } from '../modelLibrary.js'
 import { assetStore } from '../assetStore.js'
 const props = defineProps({ models: { type: Array, default: () => [] }, clips: { type: Array, default: () => [] }, backgroundClips: { type: Array, default: () => [] }, open: Boolean, disabled: Boolean })
-const emit = defineEmits(['toggle', 'add', 'add-image', 'background-image'])
+const emit = defineEmits(['toggle', 'add', 'add-image', 'background-image', 'add-audio'])
 const referenced = asset => props.clips.some(c => c.assetId === asset.id) || props.backgroundClips.some(c => c.assetId === asset.id)
 const activeTab = ref('model')
 const assets = ref([])

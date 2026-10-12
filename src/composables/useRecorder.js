@@ -30,8 +30,6 @@ export function useRecorder() {
   let animFrameId = null
   let outCvs = null
   let outCtx = null
-  let audioCtx = null
-  let audioDest = null
   let readBackground = null
   let readViewRect = null
   let mode = 'canvas'
@@ -46,18 +44,9 @@ export function useRecorder() {
     ctx.fillRect(0, 0, width, height)
   }
 
-  function setupAudio(audioEl) {
-    if (!audioEl) return
-    try {
-      if (!audioCtx) audioCtx = new AudioContext()
-      if (audioCtx.state === 'suspended') audioCtx.resume()
-      if (!audioDest) audioDest = audioCtx.createMediaStreamDestination()
-      const src = audioCtx.createMediaElementSource(audioEl)
-      src.connect(audioDest)
-      src.connect(audioCtx.destination)
-    } catch {
-      // 同一个媒体元素只能创建一次 source，重复调用会抛错，忽略即可
-    }
+  /** 音频轨道混音由 audioScheduler 的 masterGain 提供，这里只把它的音轨并进导出流。 */
+  function audioTrackOf(audioStream) {
+    return audioStream?.getAudioTracks?.()[0] || null
   }
 
   /**
@@ -138,13 +127,13 @@ export function useRecorder() {
     setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 
-  function start(sourceCanvas, audioEl, nextMode = 'canvas', getBackground = null, getViewRect = null, fps = RECORD_FPS) {
+  function start(sourceCanvas, audioStream, nextMode = 'canvas', getBackground = null, getViewRect = null, fps = RECORD_FPS) {
     if (!canRecord.value || isRecording.value || !sourceCanvas) return false
 
     mode = nextMode === 'portrait' ? 'portrait' : 'canvas'
     readBackground = typeof getBackground === 'function' ? getBackground : null
     readViewRect = typeof getViewRect === 'function' ? getViewRect : null
-    setupAudio(audioEl)
+    const mixedTrack = audioTrackOf(audioStream)
 
     const win = viewWindow(sourceCanvas)
     const size = resolveOutputSize(win.sw, win.sh, mode)
@@ -155,10 +144,7 @@ export function useRecorder() {
 
     try {
       const stream = outCvs.captureStream([24, 30, 60].includes(fps) ? fps : RECORD_FPS)
-      if (audioDest) {
-        const audioTrack = audioDest.stream.getAudioTracks()[0]
-        if (audioTrack) stream.addTrack(audioTrack)
-      }
+      if (mixedTrack) stream.addTrack(mixedTrack)
 
       const mimeType = pickMimeType()
       chunks = []
@@ -229,11 +215,6 @@ export function useRecorder() {
       mediaRecorder = null
     }
     chunks = []
-    if (audioCtx) {
-      audioCtx.close().catch(() => {})
-      audioCtx = null
-      audioDest = null
-    }
   }
 
   return {

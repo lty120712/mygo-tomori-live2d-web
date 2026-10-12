@@ -1,4 +1,5 @@
-import { visualClips, createImageClip, appendVisualClips, visualClipLimit, backgroundAtTime, backgroundClipLimit, createClipFromTemplate, createColorBackgroundClip, createImageBackgroundClip, planBackgroundAdd, migrateLegacyBackground } from '../mediaTracks.js'
+import { visualClips, createImageClip, appendVisualClips, visualClipLimit, backgroundAtTime, backgroundClipLimit, createClipFromTemplate, createColorBackgroundClip, createImageBackgroundClip, planBackgroundAdd, migrateLegacyBackground, AUDIO_TRACK_LIMIT, audioClipLimit, audioClipTemplate, createAudioClip, createAudioClipFromTemplate } from '../mediaTracks.js'
+import { createAudioScheduler } from '../audioScheduler.js'
 import { assetStore } from '../assetStore.js'
 import { LEGACY_SCENE_KEY, SCENE_KEY, localStore, restoreScene } from '../localStore.js'
 import {sampleTimelinePose} from '../timelinePose.js'
@@ -42,7 +43,7 @@ export function useSceneEditor() {
   const runtime = computed(()=>runtimes[selectedId.value])
   const previewMotionInfo=computed(()=>runtime.value?.info[previewMotionName.value])
   const loading = computed(()=>backgroundLoading.value || uploadingBackground.value || imageLoading.value || project.clips.some(c=>!runtimes[c.id]))
-  const missingMedia=computed(()=>[...missingImages.value.map(c=>c.name),...missingBackgrounds.value.map(c=>c.name)].join('、'))
+  const missingMedia=computed(()=>[...missingImages.value.map(c=>c.name),...missingBackgrounds.value.map(c=>c.name),...missingAudio.value.map(c=>c.name)].join('、'))
   const canSplit = computed(()=>selected.value && time.value>selected.value.start && time.value<selected.value.start+selected.value.duration)
   function sampleState(clip) {
     const state = sampleClip(clip,time.value,project.fps,runtimes[clip.id]?.groups || [])
@@ -256,6 +257,65 @@ export function useSceneEditor() {
     return withBackgroundEdit(()=>editBackground(id,patch))
   }
   const deleteBackgroundAction=id=>withBackgroundEdit(()=>{project.backgroundClips=project.backgroundClips.filter(c=>c.id!==id)})
+  // ——— 音频轨道 ———
+  const audio=createAudioScheduler()
+  const audioAssetIds=ref(null)
+  const missingAudio=computed(()=>audioAssetIds.value ? project.audioClips.filter(c=>!audioAssetIds.value.has(c.assetId)) : [])
+  async function refreshAudioAssets(){
+    try{ audioAssetIds.value=new Set((await assetStore.list()).filter(asset=>asset.kind==='audio').map(asset=>asset.id)) }
+    catch{ audioAssetIds.value=null }
+  }
+  watch(()=>project.audioClips,clips=>audio.setClips(clips),{deep:true,immediate:true})
+  const audioStart=()=>Math.round(Math.min(time.value,Math.max(0,project.duration-1/project.fps))*project.fps)/project.fps
+  const audioTrack=value=>Math.max(0,Math.min(AUDIO_TRACK_LIMIT-1,Number(value)||0))
+  function audioTrackFree(track,start,duration,exceptId=''){return !project.audioClips.some(c=>c.id!==exceptId && c.track===track && start<c.start+c.duration-1e-8 && start+duration>c.start+1e-8)}
+  function firstFreeAudioTrack(start,duration,preferred=0){
+    for(const track of [audioTrack(preferred),...Array.from({length:AUDIO_TRACK_LIMIT},(_,index)=>index)]) if(audioTrackFree(track,start,duration)) return track
+    return -1
+  }
+  function placeAudioClip(clip){
+    const limit=audioClipLimit(project.audioClips)
+    if(limit){message.value=limit;return false}
+    if(!audioTrackFree(clip.track,clip.start,clip.duration)){message.value='音频轨道 '+(clip.track+1)+' 在这个时间段已有片段；请换一条轨道或调整时长';return false}
+    project.audioClips.push(clip)
+    message.value='已在音频轨道 '+(clip.track+1)+' 添加片段：'+clip.name
+    return true
+  }
+  function addAudioClip(asset,track=0){
+    const start=audioStart(),length=Math.max(1/project.fps,Math.min(asset.duration || 5,project.duration-start))
+    refreshAudioAssets()
+    return placeAudioClip(createAudioClip(asset,start,length,audioTrack(track)))
+  }
+  function editAudioClip(id,patch){
+    const clip=project.audioClips.find(c=>c.id===id);if(!clip)return false
+    const min=1/project.fps,round=value=>Math.round(value*project.fps)/project.fps
+    const next={...clip,...patch}
+    next.start=round(Math.max(0,Math.min(project.duration-min,Number(next.start)||0)))
+    next.duration=round(Math.max(min,Math.min(project.duration-next.start,Number(next.duration)||min)))
+    next.offset=Math.max(0,Number(next.offset)||0)
+    next.volume=Math.max(0,Math.min(1,next.volume ?? 1))
+    next.fadeIn=Math.max(0,Math.min(next.duration,next.fadeIn || 0))
+    next.fadeOut=Math.max(0,Math.min(next.duration,next.fadeOut || 0))
+    if(!audioTrackFree(next.track,next.start,next.duration,id)){message.value='音频轨道 '+(next.track+1)+' 在这个时间段已有片段；请换一条轨道或调整时长';return false}
+    Object.assign(clip,{start:next.start,duration:next.duration,offset:next.offset,volume:next.volume,fadeIn:next.fadeIn,fadeOut:next.fadeOut})
+    return true
+  }
+  function pasteAudioClip(template){
+    const limit=audioClipLimit(project.audioClips)
+    if(limit){message.value=limit;return false}
+    const start=audioStart(),length=Math.max(1/project.fps,Math.min(template.duration || 5,project.duration-start))
+    const track=firstFreeAudioTrack(start,length,template.track || 0)
+    if(track<0){message.value='没有空闲的音频轨道可以粘贴，请先调整现有片段';return false}
+    refreshAudioAssets()
+    return placeAudioClip(createAudioClipFromTemplate(template,start,length,track))
+  }
+  function deleteAudioClip(id){project.audioClips=project.audioClips.filter(c=>c.id!==id)}
+  const addAudioAction=(asset,track)=>withAudioEdit(()=>addAudioClip(asset,track))
+  const editAudioAction=(id,patch)=>withAudioEdit(()=>editAudioClip(id,patch))
+  const deleteAudioAction=id=>withAudioEdit(()=>deleteAudioClip(id))
+  const pasteAudioAction=template=>withAudioEdit(()=>pasteAudioClip(template))
+  // 与背景轨道一致：不在这里 history.end()，拖动期间时间线已打开手势，松手才落一条记录。
+  function withAudioEdit(mutate){if(locked.value)return;return history.edit(mutate)}
   function renameLayer(track,value){const name=String(value).trim().slice(0,100);if(!name)return;for(const clip of allClips.value.filter(c=>c.track===track))clip.layerName=name}
   function changeLayerState(track,patch){setLayerState(allClips.value,track,patch);drive()}
   function reorderLayer(from,to){reorderSceneLayer(allClips.value,from,to)}
@@ -422,7 +482,7 @@ export function useSceneEditor() {
     clearLivePreview()
     if(frame.value>=project.duration*project.fps)frame.value=0
     for(const r of Object.values(runtimes)){r.wasVisible=false;r.lastFrame=-1;r.timelineMotion=null}
-    playing.value=true;startTimestamp=performance.now();startFrame=frame.value;drive();raf=requestAnimationFrame(tick)
+    playing.value=true;startTimestamp=performance.now();startFrame=frame.value;drive();startAudio();raf=requestAnimationFrame(tick)
   }
   function tick(now) {
     if(!playing.value)return
@@ -430,18 +490,28 @@ export function useSceneEditor() {
     if(next.wrapped){
       startFrame=0;startTimestamp=now-next.remainder/project.fps*1000
       for(const r of Object.values(runtimes)){resetModelPose(r.sdk);r.wasVisible=false;r.lastFrame=-1;r.timelineMotion=null;r.expression=''}
+      startAudio()
     }
     frame.value=next.frame;drive()
     if(next.ended){pause();if(recorder.isRecording.value)recorder.stop();return}
     raf=requestAnimationFrame(tick)
   }
-  function pause(){playing.value=false;cancelAnimationFrame(raf)}
+  function startAudio(){
+    if(!project.audioClips.length)return
+    audio.play(time.value).then(()=>{
+      const bad=audio.problems
+      if(!bad.length)return
+      const names=project.audioClips.filter(c=>bad.includes(c.assetId)).map(c=>c.name)
+      message.value='以下音频素材缺失或无法解码，播放已跳过：'+[...new Set(names)].join('、')
+    }).catch(()=>{message.value='音频播放失败：请点击播放后重试'})
+  }
+  function pause(){playing.value=false;audio.pause();cancelAnimationFrame(raf)}
   function clearPreviewOverrides(){for(const id of Object.keys(previewOverrides))delete previewOverrides[id]}
   function seek(value){if(recorder.isRecording.value)return;pause();const n=Number(value);if(!Number.isFinite(n))return;clearLivePreview();for(const r of Object.values(runtimes))if(r.timelineMotion){resetModelPose(r.sdk);r.timelineMotion=null;r.expression=''}clearPreviewOverrides();frame.value=Math.round(Math.max(0,Math.min(project.duration,n))*project.fps);drive()}
   function stop(){pause();seek(0)}
   function changeDuration(value) {
     const n=Number(value);if(locked.value || !Number.isFinite(n))return
-    project.duration=Math.min(600,Math.max(.5,n,...allClips.value.map(c=>c.start+c.duration),...project.backgroundClips.map(c=>c.start+c.duration)));seek(Math.min(time.value,project.duration))
+    project.duration=Math.min(600,Math.max(.5,n,...allClips.value.map(c=>c.start+c.duration),...project.backgroundClips.map(c=>c.start+c.duration),...project.audioClips.map(c=>c.start+c.duration)));seek(Math.min(time.value,project.duration))
   }
   function changeFps(value) {
     if(locked.value)return
@@ -453,7 +523,7 @@ export function useSceneEditor() {
     if(loading.value)return
     if(missingMedia.value)message.value='以下素材缺失，录制将跳过：'+missingMedia.value
     const resolveBackground=()=>{const bg=backgroundAtTime(project.backgroundClips,{color:project.background,image:project.backgroundImage},time.value);return {color:bg.kind==='color' ? bg.color : project.background}}
-    stop();if(recorder.start(sceneCanvas.value.getCanvas(),null,'canvas',resolveBackground,null,project.fps))play();else message.value='无法开始录制'
+    stop();if(recorder.start(sceneCanvas.value.getCanvas(),audio.stream,'canvas',resolveBackground,null,project.fps))play();else message.value='无法开始录制'
   }
   function exportProject() {
     message.value=missingMedia.value ? '工程已导出，但以下素材缺失：'+missingMedia.value : '工程已导出；图片引用本浏览器素材库，尚不包含图片文件'
@@ -484,6 +554,7 @@ export function useSceneEditor() {
     window.addEventListener('keydown',shortcut)
     window.addEventListener('pagehide',flushScene)
     document.addEventListener('visibilitychange',onVisibilityChange)
+    refreshAudioAssets()
     // 工程统一存在 IndexedDB 的 documents 仓库；只有数据库为空时才读一次旧的 localStorage 数据。
     const restored=await restoreScene({store:localStore,readLegacy:readLegacyScene,clearLegacy:clearLegacyScene})
     if(!restored.ok){
@@ -496,6 +567,6 @@ export function useSceneEditor() {
     }
     initialized=true
   })
-  onBeforeUnmount(()=>{window.removeEventListener('keydown',shortcut);window.removeEventListener('pagehide',flushScene);document.removeEventListener('visibilitychange',onVisibilityChange);pause();clearInterval(previewTimer);flushScene();recorder.destroy()})
-  return {allClips,imageStatus,missingImages,missingBackgrounds,addImage:editable(addImage),addBackgroundColor,addBackgroundImage,pasteBackgroundClip,editBackground:editBackgroundAction,deleteBackground:deleteBackgroundAction,sceneTimeline,selectTimeline,changeAspectRatio:editable(changeAspectRatio),canvasSelection,selectCanvas,batchCanvasTransform:editable(batchCanvasTransform),batchClips:editable(batchClips),editLocked,changeLayerState:editable(changeLayerState),project,runtimes,selectedId,playing,loopPlayback,message,paramSearch,allParams,autoTransform,sceneCanvas,projectInput,recorder,locked,time,selected,runtime,loading,canSplit,selectedPose,paramLabels,assetModels:models,visibleParams,transformFields,hasKey,previewMotionName,previewExpressionName,activePreview,previewMotionInfo,previewProgress,preview,resetPreview,endPreview,mouseMoved,changeMouseTrack:editable(changeMouseTrack),addChosenEvent:editable(addChosenEvent),canUndo,canRedo,undo,redo,beginEdit,endEdit,renameClip:editable(renameClip,true),changeBackground:editable(changeBackground,true),backgroundInput,backgroundLoading,uploadingBackground,uploadBackground,removeBackgroundImage:editable(removeBackgroundImage),resetBackground:editable(resetBackground),addModel:editable(addModel),renameLayer:editable(renameLayer),reorderLayer:editable(reorderLayer),editClip:editable(editClip,true),editTiming:editable(editTiming,true),editTransform:editable(editTransform,true),resetPlacement:editable(resetPlacement),moveModel:editable(moveModel),transformModel:editable(transformModel),editParam:editable(editParam,true),resetParam:editable(resetParam),toggleKey:editable(toggleKey),removeKey:editable(removeKey),moveKey:editable(moveKey),batchKeys:editable(batchKeys),editKeyValue:editable(editKeyValue,true),editEvent:editable(editEvent),pasteEvent:editable(pasteEvent),removeEvent:editable(removeEvent),duplicate:editable(duplicate),split:editable(split),deleteSelected:editable(deleteSelected),runtimeReady,disposeRuntime,runtimeError,addEvent:editable(addEvent),play,pause,seek,stop,changeDuration:editable(changeDuration,true),changeFps:editable(changeFps),record,exportProject,importProject}
+  onBeforeUnmount(()=>{window.removeEventListener('keydown',shortcut);window.removeEventListener('pagehide',flushScene);document.removeEventListener('visibilitychange',onVisibilityChange);pause();audio.destroy();clearInterval(previewTimer);flushScene();recorder.destroy()})
+  return {allClips,imageStatus,missingImages,missingBackgrounds,missingAudio,addAudioClip:addAudioAction,editAudioClip:editAudioAction,deleteAudioClip:deleteAudioAction,pasteAudioClip:pasteAudioAction,addImage:editable(addImage),addBackgroundColor,addBackgroundImage,pasteBackgroundClip,editBackground:editBackgroundAction,deleteBackground:deleteBackgroundAction,sceneTimeline,selectTimeline,changeAspectRatio:editable(changeAspectRatio),canvasSelection,selectCanvas,batchCanvasTransform:editable(batchCanvasTransform),batchClips:editable(batchClips),editLocked,changeLayerState:editable(changeLayerState),project,runtimes,selectedId,playing,loopPlayback,message,paramSearch,allParams,autoTransform,sceneCanvas,projectInput,recorder,locked,time,selected,runtime,loading,canSplit,selectedPose,paramLabels,assetModels:models,visibleParams,transformFields,hasKey,previewMotionName,previewExpressionName,activePreview,previewMotionInfo,previewProgress,preview,resetPreview,endPreview,mouseMoved,changeMouseTrack:editable(changeMouseTrack),addChosenEvent:editable(addChosenEvent),canUndo,canRedo,undo,redo,beginEdit,endEdit,renameClip:editable(renameClip,true),changeBackground:editable(changeBackground,true),backgroundInput,backgroundLoading,uploadingBackground,uploadBackground,removeBackgroundImage:editable(removeBackgroundImage),resetBackground:editable(resetBackground),addModel:editable(addModel),renameLayer:editable(renameLayer),reorderLayer:editable(reorderLayer),editClip:editable(editClip,true),editTiming:editable(editTiming,true),editTransform:editable(editTransform,true),resetPlacement:editable(resetPlacement),moveModel:editable(moveModel),transformModel:editable(transformModel),editParam:editable(editParam,true),resetParam:editable(resetParam),toggleKey:editable(toggleKey),removeKey:editable(removeKey),moveKey:editable(moveKey),batchKeys:editable(batchKeys),editKeyValue:editable(editKeyValue,true),editEvent:editable(editEvent),pasteEvent:editable(pasteEvent),removeEvent:editable(removeEvent),duplicate:editable(duplicate),split:editable(split),deleteSelected:editable(deleteSelected),runtimeReady,disposeRuntime,runtimeError,addEvent:editable(addEvent),play,pause,seek,stop,changeDuration:editable(changeDuration,true),changeFps:editable(changeFps),record,exportProject,importProject}
 }

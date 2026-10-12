@@ -127,3 +127,14 @@ test('上下文被浏览器挂起时播放前先恢复', async () => {
   await scheduler.play(0)
   assert.equal(ctx.resumeCalls, 1)
 })
+
+test('素材缺失或解码失败会记入 problems，供界面提示', async () => {
+  const { scheduler } = setup(
+    [createAudioClip(asset, 0, 5, 0), createAudioClip({ id: 'broken' }, 0, 5, 1), createAudioClip({ id: 'missing' }, 0, 5, 2)],
+    { decode: async (_context, file) => { if (file.assetId === 'broken') throw new Error('解码失败'); return { duration: 5 } } }
+  )
+  await scheduler.play(0)
+  assert.deepEqual(scheduler.problems.sort(), ['broken', 'missing'])
+  scheduler.destroy()
+  assert.deepEqual(scheduler.problems, [])
+})

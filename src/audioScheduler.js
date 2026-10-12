@@ -33,6 +33,7 @@ export function createAudioScheduler(options = {}) {
 
   const buffers = new Map()
   const decoding = new Map()
+  const problems = new Set()
   let context = null, master = null, mixer = null, sources = []
   let clips = []
   let started = false
@@ -56,12 +57,13 @@ export function createAudioScheduler(options = {}) {
       decoding.set(assetId, Promise.resolve()
         .then(() => loadFile(assetId))
         .then(async file => {
-          if (!file) return null
+          if (!file) { problems.add(assetId); return null }
           const decoded = await decode(context, file)
           if (decoded) buffers.set(assetId, decoded)
+          else problems.add(assetId)
           return decoded || null
         })
-        .catch(() => null)
+        .catch(() => { problems.add(assetId); return null })
         .finally(() => decoding.delete(assetId)))
     }
     return decoding.get(assetId)
@@ -123,6 +125,7 @@ export function createAudioScheduler(options = {}) {
     started = false
     buffers.clear()
     decoding.clear()
+    problems.clear()
     if (context) {
       try { context.close() } catch {}
       context = null; master = null; mixer = null
@@ -136,6 +139,7 @@ export function createAudioScheduler(options = {}) {
     seek,
     resume: ensure,
     destroy,
+    get problems() { return [...problems] },
     get playing() { return started },
     get masterGain() { return master },
     get stream() { return mixer ? mixer.stream : null },
