@@ -217,7 +217,8 @@ export function useSceneEditor() {
     let asset=null
     try{asset=await prepareLegacyBackground()}catch(error){message.value='背景图片迁移失败：'+error.message}
     if(locked.value)return
-    history.end()
+    // 不在这里 history.end()：拖动期间时间线已经用 begin-edit 打开手势，
+    // 连续的位置更新应该并进同一步撤销，只有松手（end-edit）才落一次记录。
     // 迁移素材在校验之前就准备好了：编辑被拒绝时把它删掉，避免留下没人引用的重复素材。
     history.edit(()=>{const applied=mutate(asset)!==false;if(!applied && asset)assetStore.remove(asset.id).catch(()=>{})})
   }
