@@ -5,6 +5,7 @@
     <div v-if="backgroundSelection" class="timeline-tools background-tools"><div class="tool-group" role="group" aria-label="所选背景片段操作"><span>已选 1 个背景片段</span><button :disabled="disabled || !playheadInsideClip(selectedBackgroundClip)" title="在播放头切割所选背景片段" @click="emit('split-background',backgroundSelection)">在播放头切割</button><button :disabled="disabled" title="复制所选背景片段（Ctrl+C）" @click="copyBackgroundClip()">复制片段</button><button :disabled="editDisabled || !backgroundClipboard" title="粘贴到播放头（Ctrl+V）" @click="pasteBackgroundClip()">粘贴片段</button><button :disabled="disabled" @click="deleteBackgroundSelection()">删除所选片段</button></div></div>
     <div v-if="audioSelection" class="timeline-tools audio-tools"><div class="tool-group" role="group" aria-label="所选音频片段操作"><span>已选 1 个音频片段</span><button :disabled="disabled || !playheadInsideClip(selectedAudioClip)" title="在播放头切割所选音频片段" @click="emit('split-audio',audioSelection)">在播放头切割</button><button :disabled="disabled" title="复制所选音频片段（Ctrl+C）" @click="copyAudioClip()">复制片段</button><button :disabled="editDisabled || !audioClipboard" title="粘贴到播放头（Ctrl+V）" @click="pasteAudioClip()">粘贴片段</button><button :disabled="disabled" @click="deleteAudioSelection()">删除所选片段</button></div></div>
     <div v-if="clipboardNotice" class="clipboard-notice" role="status" :title="clipboardNotice">{{clipboardNotice}}</div>
+<div v-if="audioClips.length" class="timeline-tools beat-tools"><div class="tool-group" role="group" aria-label="音频节拍"><label title="在音频波形上标出节拍点；拖动播放头或片段时吸附到最近的节拍（按住 Alt 临时关闭）"><input type="checkbox" role="switch" aria-label="节拍吸附" v-model="beatSnap" />节拍吸附</label><small>节拍点由音频波形推导，用来把画面和背景对齐到音频</small></div></div>
     <div v-if="selected" class="key-tools"><div class="tool-group" role="group" aria-label="关键帧属性选择"><button :aria-expanded="showKeyRows" @click="showKeyRows=!showKeyRows">{{showKeyRows ? '收起关键帧' : '展开关键帧'}}</button><select aria-label="关键帧属性" v-model="keyProperty"><option v-for="key in keyProperties" :key="key" :value="key">{{labels[key] || key}} · {{(selected.keyframes[key] || []).length}} 帧</option></select></div><div class="tool-group" role="group" aria-label="关键帧编辑"><button aria-label="上一个关键帧" :disabled="disabled || !previousKey" @click="chooseKey(previousKey)">‹</button><button aria-label="添加或删除当前关键帧" :class="{keyed:currentKey}" :disabled="editDisabled || !withinClip" @click="emit('toggle-key',keyProperty)">◆</button><button aria-label="下一个关键帧" :disabled="disabled || !nextKey" @click="chooseKey(nextKey)">›</button><label>{{labels[keyProperty] || keyProperty}}{{ valueDisplay(keyProperty).unit }}<input aria-label="关键帧属性值" type="number" :min="valueDisplay(keyProperty).min" :max="valueDisplay(keyProperty).max" step="1" :value="valueDisplay(keyProperty).toDisplay(propertyValue)" :disabled="editDisabled || !withinClip" @focus="emit('begin-edit')" @blur="$event.target.value=valueDisplay(keyProperty).toDisplay(propertyValue);emit('end-edit')" @input="emit('edit-key-value',keyProperty,valueDisplay(keyProperty).toNative($event.target.value))" /></label><button :disabled="editDisabled || !currentKey" @click="emit('remove-key',keyProperty,currentFrame)">删除关键帧</button><button :disabled="editDisabled || (!selectedKeys.length && !currentKey)" @click="openCurveEditor">速度曲线</button></div><small class="neighbor-description" :title="neighborDescription">{{neighborDescription}}</small></div>
     <div ref="scrollArea" class="timeline-scroll" @wheel="wheelZoom"><div class="timeline-content" :style="{width: (170+laneWidth)+'px'}">
     <div class="timeline-ruler"><span>轨道 / 片段</span><div ref="ruler" tabindex="-1" @pointerdown="beginSeek"><i v-for="n in ticks" :key="n" :style="{left: n / duration * 100 + '%'}">{{ formatTimecode(n,fps) }}</i><b v-if="snapTime!==null" class="snap-guide" :style="{left:snapTime/duration*100+'%'}"></b><b :style="{left: time / duration * 100 + '%'}" title="拖动播放头"></b></div></div>
@@ -49,9 +50,10 @@
         <div class="track-lane audio-lane" tabindex="-1" @pointerdown.self="clickAudioLane($event)" @contextmenu.prevent.stop="openAudioAddMenu($event,lane)">
           <div v-for="clip in clipsOnAudioTrack(lane)" :key="clip.id" class="model-clip audio-clip" tabindex="0" :class="{selected:audioSelection===clip.id,multiselected:audioSelection===clip.id,muted:clip.muted}" :aria-label="'音频片段 '+clip.name" :title="audioTitle(clip)" :style="{left:clip.start/duration*100+'%',width:clip.duration/duration*100+'%'}" @contextmenu.prevent.stop="openAudioMenu($event,clip)" @pointerdown="beginAudio($event,clip,'move')" @pointermove="moveAudio" @pointerup="endAudio" @pointercancel="endAudio" @lostpointercapture="endAudio">
             <span class="trim-handle left" title="调整音频入点" @pointerdown.stop="beginAudio($event,clip,'left')"></span>
-            <AudioWaveform :clip="clip" />
+            <AudioWaveform :clip="clip" :beats="beatSnap" />
             <span class="clip-name">{{clip.name}}</span><small>{{formatTimecode(clip.duration,fps)}}</small>
             <span class="trim-handle right" title="调整音频出点" @pointerdown.stop="beginAudio($event,clip,'right')"></span>
+            <span class="audio-scrub" title="拖动波形定位播放头（吸附节拍）；拖动上方标签条移动片段" @pointerdown.stop="scrubAudio($event,clip)" @contextmenu.prevent.stop="openAudioMenu($event,clip)"></span>
           </div>
           <b v-if="snapTime!==null" class="snap-guide" :style="{left:snapTime/duration*100+'%'}"></b><b class="playhead" :style="{left:time/duration*100+'%'}"></b>
         </div>
@@ -171,6 +173,7 @@ import AudioWaveform from './AudioWaveform.vue'
 import { formatTimecode } from '../timecode.js'
 import { editTimelineClip,timelineTicks } from '../timelineEditing.js'
 import { assetStore } from '../assetStore.js'
+import { collectBeats,snapToBeats } from '../audioBeats.js'
 import { groupedClipKeys,visibleClipKeys,uniqueKeyRefs,planKeyRefMove } from '../timelineKeyframes.js'
 const props=defineProps({clips:Array,backgroundClips:{type:Array,default:()=>[]},audioClips:{type:Array,default:()=>[]},audioTrackState:{type:Object,default:()=>({})},selectedIds:Array,duration:Number,fps:Number,time:Number,selectedId:String,selected:Object,labels:Object,pose:Object,runtimes:Object,transformFields:Array,disabled:Boolean,navigationDisabled:Boolean})
 const emit=defineEmits(['selection-change','clear-selection','batch-clips','batch-keys','select','seek','layer-state','background-track-state','audio-track-state','rename-layer','reorder-layer','edit-clip','remove-key','move-key','toggle-key','edit-key-value','edit-event','paste-event','remove-event','begin-edit','end-edit','delete-selected','add-background-color','background-edit','delete-background','split-background','background-image','import-background-image','paste-background','add-audio','import-audio','audio-edit','delete-audio','split-audio','paste-audio'])
@@ -344,12 +347,61 @@ function beginTrackSeek(e,track){if(props.disabled || e.button!==0)return;const 
 function globalTime(frame){return props.selected.start+frame/props.fps-props.selected.offset}
 function visibleEvents(type){return props.selected.events.filter(e=>e.type===type && eventRange(props.selected,e,props.fps).duration>0)}
 let scrubbing=null,drag=null
-function seekAt(clientX,rect){emit('seek',Math.max(0,Math.min(props.duration,(clientX-rect.left)/rect.width*props.duration)))}
-function beginSeek(e){if(props.disabled || e.button!==0)return;const target=e.currentTarget.closest('.track-lane') || ruler.value;scrubbing={pointerId:e.pointerId,target};target.setPointerCapture(e.pointerId);target.focus({preventScroll:true});e.preventDefault();seekAt(e.clientX,target.getBoundingClientRect())}
-function moveSeek(e){if(drag){move(e);return}if(backgroundDrag){moveBackground(e);return}if(audioDrag){moveAudio(e);return}if(layerDrag){moveLayerDrag(e);return}if(eventDrag){moveEvent(e);return}if(keyDrag){moveKey(e);return}if(box){updateBox(e);return}if(scrubbing?.pointerId===e.pointerId && !props.disabled)seekAt(e.clientX,scrubbing.target.getBoundingClientRect())}
-function endSeek(e){if(drag)end();if(backgroundDrag)endBackground();if(audioDrag)endAudio();if(layerDrag)endLayerDrag(e);if(eventDrag)endEvent();if(keyDrag)endKey();if(box)endBox();if(scrubbing?.pointerId===e.pointerId)scrubbing=null}
+// 节拍：波形里推导出来的提示点，播放头定位、片段移动与裁剪都拿它当吸附目标
+const beatSnap=ref(true),beatsByAsset=ref({}),beatRequests=new Set()
+async function loadBeats(assetId){
+  if(!assetId || beatRequests.has(assetId) || assetId in beatsByAsset.value)return
+  beatRequests.add(assetId)
+  let times=null
+  try{times=await assetStore.beats(assetId)}catch{times=null}
+  if(times?.length)beatsByAsset.value={...beatsByAsset.value,[assetId]:times}
+}
+watch(()=>props.audioClips.map(c=>c.assetId).join('|'),()=>{for(const clip of props.audioClips)loadBeats(clip.assetId)},{immediate:true})
+const beatTargets=computed(()=>beatSnap.value ? collectBeats(props.audioClips,beatsByAsset.value,{end:props.duration}) : [])
+function seekAt(clientX,rect,altKey){
+  const raw=Math.max(0,Math.min(props.duration,(clientX-rect.left)/rect.width*props.duration))
+  const hit=beatSnap.value && !altKey ? snapToBeats(raw,beatTargets.value,8/rect.width*props.duration) : {time:raw,snapped:null}
+  snapTime.value=hit.snapped
+  emit('seek',hit.time)
+}
+function beginSeek(e){if(props.disabled || e.button!==0)return;const target=e.currentTarget.closest('.track-lane') || ruler.value;scrubbing={pointerId:e.pointerId,target};target.setPointerCapture(e.pointerId);target.focus({preventScroll:true});e.preventDefault();seekAt(e.clientX,target.getBoundingClientRect(),e.altKey)}
+function moveSeek(e){
+  if(drag){move(e);return}
+  if(backgroundDrag){moveBackground(e);return}
+  if(audioDrag){moveAudio(e);return}
+  if(layerDrag){moveLayerDrag(e);return}
+  if(eventDrag){moveEvent(e);return}
+  if(keyDrag){moveKey(e);return}
+  if(box){updateBox(e);return}
+  if(scrubbing?.pointerId===e.pointerId && !props.disabled)seekAt(e.clientX,scrubbing.target.getBoundingClientRect(),e.altKey)
+}
+function endSeek(e){
+  if(drag)end()
+  if(backgroundDrag)endBackground()
+  if(audioDrag)endAudio()
+  if(layerDrag)endLayerDrag(e)
+  if(eventDrag)endEvent()
+  if(keyDrag)endKey()
+  if(box)endBox()
+  if(scrubbing?.pointerId===e.pointerId){scrubbing=null;snapTime.value=null}
+}
 function begin(e,clip,mode){if(props.disabled || clip.layerLocked || e.button!==0 || e.ctrlKey || e.metaKey || e.shiftKey)return;chooseClip(clip);selectedKeys.value=[];selectedEventId.value='';e.currentTarget.closest('.model-clip').focus({preventScroll:true});emit('begin-edit');dragging.value=true;drag={original:props.clips.filter(c=>selectedClips.value.includes(c.id)).map(c=>JSON.parse(JSON.stringify(c))),id:clip.id,mode,x:e.clientX,start:clip.start,duration:clip.duration,offset:clip.offset,width:e.currentTarget.closest('.track-lane').clientWidth,scrollLeft:scrollArea.value.scrollLeft};timelineRoot.value.setPointerCapture(e.pointerId);e.preventDefault()}
-function move(e){if(!drag)return;if(drag.mode==='move'){const ids=new Set(drag.original.map(c=>c.id)),delta=(e.clientX-drag.x+scrollArea.value.scrollLeft-drag.scrollLeft)/drag.width*props.duration,targets=snapping.value && !e.altKey ? [0,props.duration,props.time,...props.clips.filter(c=>!ids.has(c.id)).flatMap(c=>[c.start,c.start+c.duration])] : [],plan=planClipMove(props.clips,drag.original,delta,{duration:props.duration,fps:props.fps,targets,tolerance:8/drag.width*props.duration});snapTime.value=plan.snapTime;emit('batch-clips',{type:'move',entries:plan.entries});return}const delta=(e.clientX-drag.x+scrollArea.value.scrollLeft-drag.scrollLeft)/drag.width*props.duration,targets=snapping.value && !e.altKey ? [0,props.duration,props.time,...props.clips.filter(c=>c.id!==drag.id).flatMap(c=>[c.start,c.start+c.duration])] : [],result=editTimelineClip(drag,delta,{duration:props.duration,fps:props.fps,targets,tolerance:8/drag.width*props.duration});snapTime.value=result.snapTime;emit('edit-clip',drag.id,result.patch)}
+function move(e){
+  if(!drag)return
+  const delta=(e.clientX-drag.x+scrollArea.value.scrollLeft-drag.scrollLeft)/drag.width*props.duration,tolerance=8/drag.width*props.duration
+  if(drag.mode==='move'){
+    const ids=new Set(drag.original.map(c=>c.id))
+    const targets=snapping.value && !e.altKey ? [0,props.duration,props.time,...props.clips.filter(c=>!ids.has(c.id)).flatMap(c=>[c.start,c.start+c.duration]),...beatTargets.value] : []
+    const plan=planClipMove(props.clips,drag.original,delta,{duration:props.duration,fps:props.fps,targets,tolerance})
+    snapTime.value=plan.snapTime
+    emit('batch-clips',{type:'move',entries:plan.entries})
+    return
+  }
+  const targets=snapping.value && !e.altKey ? [0,props.duration,props.time,...props.clips.filter(c=>c.id!==drag.id).flatMap(c=>[c.start,c.start+c.duration]),...beatTargets.value] : []
+  const result=editTimelineClip(drag,delta,{duration:props.duration,fps:props.fps,targets,tolerance})
+  snapTime.value=result.snapTime
+  emit('edit-clip',drag.id,result.patch)
+}
 function end(){if(drag)emit('end-edit');drag=null;dragging.value=false;snapTime.value=null}
 function updateToolbarSize(){availableWidth.value=scrollArea.value.clientWidth;minimumTimelineHeight.value=Math.max(220,[...timelineRoot.value.querySelectorAll('.timeline-tools,.key-tools')].reduce((sum,el)=>sum+el.getBoundingClientRect().height,104))}
 function observeToolbars(){for(const el of timelineRoot.value?.querySelectorAll('.timeline-tools,.key-tools') || [])observer?.observe(el);updateToolbarSize()}
@@ -391,7 +443,20 @@ function addBackgroundImage(asset){if(props.disabled || !asset)return;emit('back
 function importBackgroundImage(){if(props.disabled)return;emit('import-background-image');closeMenu()}
 let backgroundDrag=null
 function beginBackground(e,clip,mode){if(props.disabled || e.button!==0 || e.ctrlKey || e.metaKey || e.shiftKey)return;closeMenu();selectedClips.value=[];selectedKeys.value=[];selectedEventId.value='';audioSelection.value='';backgroundSelection.value=clip.id;emit('begin-edit');dragging.value=true;backgroundDrag={original:{...clip},mode,x:e.clientX,start:clip.start,duration:clip.duration,offset:0,width:e.currentTarget.closest('.track-lane').clientWidth,scrollLeft:scrollArea.value.scrollLeft};timelineRoot.value.setPointerCapture(e.pointerId);e.preventDefault()}
-function moveBackground(e){if(!backgroundDrag)return;const d=backgroundDrag,width=Math.max(1,d.width),delta=(e.clientX-d.x+scrollArea.value.scrollLeft-d.scrollLeft)/width*props.duration,tolerance=8/width*props.duration,targets=snapping.value && !e.altKey ? [0,props.duration,props.time,...props.backgroundClips.filter(c=>c.id!==d.original.id).flatMap(c=>[c.start,c.start+c.duration])] : [];if(d.mode==='move'){const plan=planClipMove(props.backgroundClips,[d.original],delta,{duration:props.duration,fps:props.fps,targets,tolerance});snapTime.value=plan.snapTime;if(plan.entries.length)emit('background-edit',d.original.id,{start:plan.entries[0].start});return}const result=editTimelineClip(d,delta,{duration:props.duration,fps:props.fps,targets,tolerance});snapTime.value=result.snapTime;emit('background-edit',d.original.id,{start:result.patch.start,duration:result.patch.duration})}
+function moveBackground(e){
+  if(!backgroundDrag)return
+  const d=backgroundDrag,width=Math.max(1,d.width),delta=(e.clientX-d.x+scrollArea.value.scrollLeft-d.scrollLeft)/width*props.duration,tolerance=8/width*props.duration
+  const targets=snapping.value && !e.altKey ? [0,props.duration,props.time,...props.backgroundClips.filter(c=>c.id!==d.original.id).flatMap(c=>[c.start,c.start+c.duration]),...beatTargets.value] : []
+  if(d.mode==='move'){
+    const plan=planClipMove(props.backgroundClips,[d.original],delta,{duration:props.duration,fps:props.fps,targets,tolerance})
+    snapTime.value=plan.snapTime
+    if(plan.entries.length)emit('background-edit',d.original.id,{start:plan.entries[0].start})
+    return
+  }
+  const result=editTimelineClip(d,delta,{duration:props.duration,fps:props.fps,targets,tolerance})
+  snapTime.value=result.snapTime
+  emit('background-edit',d.original.id,{start:result.patch.start,duration:result.patch.duration})
+}
 // 点选后保留选中状态，Delete 才能作用在它上面（拖动移动不改选中）。
 function endBackground(){if(backgroundDrag)emit('end-edit');backgroundDrag=null;dragging.value=false;snapTime.value=null}
 function deleteBackgroundSelection(){if(props.disabled || !backgroundSelection.value)return false;emit('delete-background',backgroundSelection.value);backgroundSelection.value='';return true}
@@ -415,7 +480,7 @@ function audioTitle(clip){
   const parts=[formatTimecode(clip.start,props.fps)+' → '+formatTimecode(clip.start+clip.duration,props.fps),'音量 '+Math.round((clip.volume ?? 1)*100)+'%']
   if(clip.fadeIn)parts.push('淡入 '+clip.fadeIn.toFixed(1)+' 秒')
   if(clip.fadeOut)parts.push('淡出 '+clip.fadeOut.toFixed(1)+' 秒')
-  return clip.name+' · '+parts.join(' · ')+' · 拖动移动；两端裁剪；右键编辑'
+  return clip.name+' · '+parts.join(' · ')+' · 拖动标签条移动，拖波形定位播放头；两端裁剪；右键编辑'
 }
 const audioAssetList=()=>assetStore.list().then(list=>list.filter(asset=>asset.kind==='audio')).catch(()=>[])
 async function openAudioAddMenu(e,track){if(props.disabled)return;positionMenu(e,{kind:'audio-add',track,title:'添加音频',assets:await audioAssetList()})}
@@ -434,7 +499,7 @@ function beginAudio(e,clip,mode){if(props.disabled || e.button!==0 || e.ctrlKey 
 function moveAudio(e){
   if(!audioDrag)return
   const d=audioDrag,width=Math.max(1,d.width),delta=(e.clientX-d.x+scrollArea.value.scrollLeft-d.scrollLeft)/width*props.duration,tolerance=8/width*props.duration
-  const targets=snapping.value && !e.altKey ? [0,props.duration,props.time,...props.audioClips.filter(c=>c.id!==d.original.id).flatMap(c=>[c.start,c.start+c.duration])] : []
+  const targets=snapping.value && !e.altKey ? [0,props.duration,props.time,...props.audioClips.filter(c=>c.id!==d.original.id).flatMap(c=>[c.start,c.start+c.duration]),...beatTargets.value] : []
   if(d.mode==='move'){
     const plan=planClipMove(props.audioClips,[d.original],delta,{duration:props.duration,fps:props.fps,targets,tolerance})
     snapTime.value=plan.snapTime
@@ -446,6 +511,13 @@ function moveAudio(e){
   emit('audio-edit',d.original.id,{start:result.patch.start,duration:result.patch.duration,offset:result.patch.offset})
 }
 function endAudio(){if(audioDrag)emit('end-edit');audioDrag=null;dragging.value=false;snapTime.value=null}
+/** 波形区域拖动＝定位播放头（吸附节拍）；片段标签条才是移动片段。 */
+function scrubAudio(e,clip){
+  if(props.disabled || e.button!==0)return
+  closeMenu()
+  selectedClips.value=[];selectedKeys.value=[];selectedEventId.value='';backgroundSelection.value='';audioSelection.value=clip.id
+  beginSeek(e)
+}
 function deleteAudioSelection(){if(props.disabled || !audioSelection.value)return false;emit('delete-audio',audioSelection.value);audioSelection.value='';return true}
 function copyAudioClip(){
   const clip=props.audioClips.find(c=>c.id===audioSelection.value)
@@ -555,4 +627,6 @@ function applyBackgroundColor(e){backgroundMenuColor.value=e.target.value;if(men
 .audio-clip { background:var(--editor-motion); }
 .layer-solo { font-size:10px!important; line-height:1!important; }
 .background-clip.hidden,.audio-clip.muted { opacity:.45; }
+.audio-scrub { position:absolute; left:4px; right:4px; top:17px; bottom:3px; z-index:2; cursor:crosshair; }
+.audio-scrub:hover { background:#ffffff40; }
 </style>

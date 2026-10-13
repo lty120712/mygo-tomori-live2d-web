@@ -1,6 +1,7 @@
 import { uid } from './sceneProject.js'
 import { ASSET_STORE, openLocalDb, withStore } from './localStore.js'
 import { decodeWaveform } from './audioWaveform.js'
+import { detectBeats } from './audioBeats.js'
 
 export const ASSET_LIMITS = { image: 64 * 1024 * 1024, audio: 512 * 1024 * 1024 }
 
@@ -85,6 +86,7 @@ export function createAssetStore(backend, options = {}) {
   const probeAudioFn = options.probeAudio || probeAudio
   const urls = new Map()
   const waveforms = new Map()
+  const beats = new Map()
   let ready = false
 
   async function init() {
@@ -126,6 +128,7 @@ export function createAssetStore(backend, options = {}) {
     await init()
     if (urls.has(id)) { URL.revokeObjectURL(urls.get(id)); urls.delete(id) }
     waveforms.delete(id)
+    beats.delete(id)
     await backend.delete(id)
   }
 
@@ -164,7 +167,19 @@ export function createAssetStore(backend, options = {}) {
     }
     return { imported, failed }
   }
-  return { init, list, importFile, importFiles, blob, remove, url, waveform }
+
+  /** 节拍点由缓存的波形峰值推导：峰值已经入 IndexedDB，这里只在内存里记一次结果。 */
+  async function beatsOf(id) {
+    if (!beats.has(id)) beats.set(id, (async () => {
+      const meta = await waveform(id)
+      if (!meta?.peaks?.length || !(meta.duration > 0)) return null
+      try {
+        return (options.detectBeats || detectBeats)(meta.peaks, meta.duration)
+      } catch { return null }
+    })())
+    return beats.get(id)
+  }
+  return { init, list, importFile, importFiles, blob, remove, url, waveform, beats: beatsOf }
 }
 
 // 浏览器默认单例
