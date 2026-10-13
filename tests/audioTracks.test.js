@@ -40,7 +40,7 @@ test('播放计划从中点起播时前移源偏移、缩短剩余时长并按�
   const plan = planAudioPlayback([clip], 5, 30)
   assert.equal(plan.length, 1)
   const { gain, ...rest } = plan[0]
-  assert.deepEqual({ ...rest, id: undefined }, { id: undefined, assetId: 'song', name: '主题曲.mp3', track: 1, offset: 4, duration: 3, volume: .7, fadeIn: 1, fadeOut: 2 })
+  assert.deepEqual({ ...rest, id: undefined }, { id: undefined, assetId: 'song', name: '主题曲.mp3', track: 1, offset: 4, duration: 3, delay: 0, volume: .7, fadeIn: 1, fadeOut: 2 })
   assert.ok(Math.abs(gain - .525) < 1e-9)
   assert.deepEqual(planAudioPlayback([clip], 2, 30)[0].offset, 1)
   assert.deepEqual(planAudioPlayback([clip], 8, 30), [])

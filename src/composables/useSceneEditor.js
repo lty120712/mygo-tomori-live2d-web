@@ -1,7 +1,9 @@
 import { visualClips, visualLayerFilter, createImageClip, appendVisualClips, visualClipLimit, backgroundAtTime, backgroundClipLimit, createClipFromTemplate, createColorBackgroundClip, createImageBackgroundClip, planBackgroundAdd, migrateLegacyBackground, AUDIO_TRACK_LIMIT, audioClipLimit, audioClipPlacement, audioClipTemplate, createAudioClip, createAudioClipFromTemplate, splitAudioClip } from '../mediaTracks.js'
 import { createAudioScheduler } from '../audioScheduler.js'
 import { assetStore } from '../assetStore.js'
-import { LEGACY_SCENE_KEY, SCENE_KEY, localStore, restoreScene } from '../localStore.js'
+import { LEGACY_SCENE_KEY, localStore } from '../localStore.js'
+import { createScenePersistence } from '../scenePersistence.js'
+import { packProject, unpackProject, restoreBundle } from '../projectBundle.js'
 import {sampleTimelinePose} from '../timelinePose.js'
 import {applyCanvasSelection} from '../canvasSelection.js'
 import {sceneParameterOverrides} from '../sceneParameterPriority.js'
@@ -37,7 +39,9 @@ export function useSceneEditor() {
   let mousePosition=null
   const sceneTimeline=ref(null)
   const sceneCanvas = ref(null), projectInput = ref(null), backgroundInput = ref(null), backgroundLoading = ref(false), uploadingBackground = ref(false), recorder = useRecorder()
-  const locked = computed(()=>playing.value || recorder.isRecording.value)
+  const preparingAudio = ref(false)
+  const transferringProject = ref(false)
+  const locked = computed(()=>playing.value || preparingAudio.value || transferringProject.value || recorder.isRecording.value)
   const time = computed(()=>frame.value/project.fps)
   const selected = computed(()=>allClips.value.find(c=>c.id===selectedId.value))
   const editLocked = computed(()=>locked.value || !!selected.value?.layerLocked)
@@ -270,7 +274,7 @@ export function useSceneEditor() {
     return true
   })
   // ——— 音频轨道 ———
-  const audio=createAudioScheduler()
+  const audio=createAudioScheduler({lookahead:0})
   const audioAssetIds=ref(null)
   const missingAudio=computed(()=>audioAssetIds.value ? project.audioClips.filter(c=>!audioAssetIds.value.has(c.assetId)) : [])
   async function refreshAudioAssets(){
@@ -524,8 +528,17 @@ export function useSceneEditor() {
     }
   }
   let raf=null,startTimestamp=0,startFrame=0
-  function play() {
-    if(loading.value || playing.value)return
+  let playbackRequest=0
+  async function prepareAudio() {
+    if(!project.audioClips.length)return
+    preparingAudio.value=true
+    try{await audio.prepare()}catch{message.value='音频初始化失败，播放将跳过音频'}finally{preparingAudio.value=false}
+  }
+  async function play(prepared=false) {
+    if(loading.value || playing.value || preparingAudio.value || transferringProject.value)return
+    const request=++playbackRequest
+    if(prepared!==true)await prepareAudio()
+    if(request!==playbackRequest)return
     clearLivePreview()
     if(frame.value>=project.duration*project.fps)frame.value=0
     for(const r of Object.values(runtimes)){r.wasVisible=false;r.lastFrame=-1;r.timelineMotion=null}
@@ -537,9 +550,9 @@ export function useSceneEditor() {
     if(next.wrapped){
       startFrame=0;startTimestamp=now-next.remainder/project.fps*1000
       for(const r of Object.values(runtimes)){resetModelPose(r.sdk);r.wasVisible=false;r.lastFrame=-1;r.timelineMotion=null;r.expression=''}
-      startAudio()
     }
     frame.value=next.frame;drive()
+    if(next.wrapped)startAudio()
     if(next.ended){pause();if(recorder.isRecording.value)recorder.stop();return}
     raf=requestAnimationFrame(tick)
   }
@@ -552,7 +565,7 @@ export function useSceneEditor() {
       message.value='以下音频素材缺失或无法解码，播放已跳过：'+[...new Set(names)].join('、')
     }).catch(()=>{message.value='音频播放失败：请点击播放后重试'})
   }
-  function pause(){playing.value=false;audio.pause();cancelAnimationFrame(raf)}
+  function pause(){playbackRequest++;playing.value=false;audio.pause();cancelAnimationFrame(raf)}
   function clearPreviewOverrides(){for(const id of Object.keys(previewOverrides))delete previewOverrides[id]}
   function seek(value){if(recorder.isRecording.value)return;pause();const n=Number(value);if(!Number.isFinite(n))return;clearLivePreview();for(const r of Object.values(runtimes))if(r.timelineMotion){resetModelPose(r.sdk);r.timelineMotion=null;r.expression=''}clearPreviewOverrides();frame.value=Math.round(Math.max(0,Math.min(project.duration,n))*project.fps);drive()}
   function stop(){pause();seek(0)}
@@ -565,29 +578,49 @@ export function useSceneEditor() {
     const next=Number(value);if(![24,30,60].includes(next))return
     frame.value=changeProjectFps(project,frame.value,next)
   }
-  function record() {
+  async function record() {
     if(recorder.isRecording.value){pause();recorder.stop();return}
-    if(loading.value)return
+    if(loading.value || preparingAudio.value || transferringProject.value)return
     if(missingMedia.value)message.value='以下素材缺失，录制将跳过：'+missingMedia.value
     const resolveBackground=()=>{const bg=backgroundAtTime(project.backgroundClips,{color:project.background,image:project.backgroundImage},time.value);return {color:bg.kind==='color' ? bg.color : project.background}}
-    stop();if(recorder.start(sceneCanvas.value.getCanvas(),audio.stream,'canvas',resolveBackground,null,project.fps))play();else message.value='无法开始录制'
+    stop();const request=++playbackRequest;await prepareAudio();if(request!==playbackRequest)return
+    if(recorder.start(sceneCanvas.value.getCanvas(),audio.stream,'canvas',resolveBackground,null,project.fps))play(true);else message.value='无法开始录制'
   }
-  function exportProject() {
-    message.value=missingMedia.value ? '工程已导出，但以下素材缺失：'+missingMedia.value : '工程已导出；图片引用本浏览器素材库，尚不包含图片文件'
-    const url=URL.createObjectURL(new Blob([JSON.stringify(project,null,2)],{type:'application/json'}))
-    const a=document.createElement('a');a.href=url;a.download='tomori-v0.1-'+Date.now()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)
+  async function exportProject() {
+    if(transferringProject.value)return
+    transferringProject.value=true
+    try {
+      const data=snapshot(project)
+      const blob=await packProject(data,assetStore)
+      const url=URL.createObjectURL(blob)
+      const a=document.createElement('a');a.href=url;a.download='tomori-v0.1-'+Date.now()+'.tomori';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)
+      message.value='已导出 .tomori 工程，包含引用的图片与音频；模型使用应用内置资源'
+    }catch(error){message.value='导出失败：'+error.message}finally{transferringProject.value=false}
   }
   function replaceProject(data) {const parsed=readProject(data,models);backgroundRequest++;uploadingBackground.value=false;pause();clearPreviewOverrides();Object.assign(project,parsed);selectCanvas(allClips.value[0] ? [allClips.value[0].id] : [],allClips.value[0]?.id);frame.value=0}
   async function importProject(event) {
     const file=event.target.files?.[0];event.target.value='';if(!file || locked.value)return
-    try{const data=JSON.parse(await file.text());if(locked.value)return;history.end();history.edit(()=>replaceProject(data));message.value='已导入场景工程'}catch(e){message.value='导入失败：'+e.message}
+    transferringProject.value=true
+    try{
+      const bundle=await unpackProject(file)
+      // 在导入任何素材前验证工程，损坏的清单不会改变当前工程。
+      readProject(bundle.project,models)
+      const data=await restoreBundle(bundle,assetStore)
+      history.end();history.edit(()=>replaceProject(data));await refreshAudioAssets();window.dispatchEvent(new Event('tomori-assets-changed'));message.value='已导入 .tomori 工程与图片、音频素材'
+    }catch(e){message.value='导入失败：'+e.message}finally{transferringProject.value=false}
   }
-  let saveTimer=null,initialized=false,sceneStoreBlocked=false
+  let saveTimer=null,initialized=false,sceneStoreBlocked=false,sceneDirty=false
+  const persistence=createScenePersistence(localStore,result=>{
+    sceneStoreBlocked=true
+    message.value=result.conflict ? '另一个页面已保存较新的工程，本页已暂停自动保存。请先导出本页工程备份，再刷新载入最新工程' : '保存工程失败，请导出工程备份'
+  })
   async function saveProject(){
-    if(!initialized || sceneStoreBlocked)return
+    if(!initialized || sceneStoreBlocked || !sceneDirty)return
     clearTimeout(saveTimer)
-    const saved=await localStore.set(SCENE_KEY,snapshot(project))
-    if(!saved)message.value='保存工程失败，请导出工程备份'
+    sceneDirty=false
+    const saved=await persistence.save(snapshot(project))
+    // 非版本冲突的失败（例如存储暂时不可用）保留待保存状态，隐藏或关闭页面时再试一次。
+    if(!saved && !sceneStoreBlocked){sceneDirty=true;message.value='保存工程失败，请导出工程备份'}
   }
   function flushScene(){clearTimeout(saveTimer);saveProject()}
   function onVisibilityChange(){if(document.visibilityState==='hidden')flushScene()}
@@ -595,7 +628,8 @@ export function useSceneEditor() {
     try{const raw=localStorage.getItem(LEGACY_SCENE_KEY);return raw ? JSON.parse(raw) : null}catch{return null}
   }
   function clearLegacyScene(){try{localStorage.removeItem(LEGACY_SCENE_KEY)}catch{}}
-  watch(project,()=>{drive();if(!initialized)return;clearTimeout(saveTimer);saveTimer=setTimeout(saveProject,300)},{deep:true})
+  watch(project,drive,{deep:true})
+  watch(project,()=>{if(!initialized)return;sceneDirty=true;clearTimeout(saveTimer);saveTimer=setTimeout(saveProject,300)},{deep:true,flush:'sync'})
   watch(selectedId,()=>{clearLivePreview();previewMotionName.value='';previewExpressionName.value='';paramSearch.value='';allParams.value=false;drive()})
   onMounted(async ()=>{
     window.addEventListener('keydown',shortcut)
@@ -603,7 +637,7 @@ export function useSceneEditor() {
     document.addEventListener('visibilitychange',onVisibilityChange)
     refreshAudioAssets()
     // 工程统一存在 IndexedDB 的 documents 仓库；只有数据库为空时才读一次旧的 localStorage 数据。
-    const restored=await restoreScene({store:localStore,readLegacy:readLegacyScene,clearLegacy:clearLegacyScene})
+    const restored=await persistence.restore(readLegacyScene,clearLegacyScene)
     if(!restored.ok){
       // 读不到就不要再写，避免用空工程覆盖数据库里已保存的内容。
       sceneStoreBlocked=true

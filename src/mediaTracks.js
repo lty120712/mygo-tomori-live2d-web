@@ -180,8 +180,9 @@ export function audioGainAt(clip, time) {
  * 每个条目带素材内起播秒数（源偏移 + 已播放部分）、剩余时长与剩余淡入淡出窗口，
  * 因此跳帧、循环回绕后重新计算即可，不依赖累计时间，不会漂移。
  */
-export function planAudioPlayback(clips, time, { trackState = {} } = {}) {
-  return audioClipsAtTime(audibleAudioClips(clips, trackState), time)
+export function planAudioPlayback(clips, time, { trackState = {}, includeFuture = false } = {}) {
+  const audible = audibleAudioClips(clips, trackState)
+  return (includeFuture ? audible.filter(c => c.start + c.duration > time) : audioClipsAtTime(audible, time))
     .slice()
     .sort((a, b) => a.start - b.start || (a.track ?? 0) - (b.track ?? 0) || String(a.id).localeCompare(String(b.id)))
     .map(clip => {
@@ -191,7 +192,8 @@ export function planAudioPlayback(clips, time, { trackState = {} } = {}) {
         id: clip.id, assetId: clip.assetId, name: clip.name, track: clip.track,
         offset: Math.max(0, (clip.offset || 0) + elapsed),
         duration: remaining,
-        gain: audioGainAt(clip, time),
+        delay: Math.max(0, clip.start - time),
+        gain: audioGainAt(clip, Math.max(time, clip.start)),
         volume: Math.max(0, Math.min(1, clip.volume ?? 1)),
         // 淡入是从片段起点开始的窗口，中途起播时只剩没走完的部分；淡出固定在片段末尾。
         fadeIn: Math.max(0, Math.min((clip.fadeIn || 0) - elapsed, remaining)),

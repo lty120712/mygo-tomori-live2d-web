@@ -64,11 +64,42 @@ export function memoryDocumentBackend() {
     async get(key) { return map.has(key) ? map.get(key) : null },
     async set(key, value) { map.set(key, value) },
     async remove(key) { map.delete(key) },
+    async getVersioned(key) { return { value: map.get(key) ?? null, revision: map.get(key + ':revision') || 0 } },
+    async compareSet(key, value, expected) {
+      const revision = map.get(key + ':revision') || 0
+      if (revision !== expected) return { ok: false, conflict: true }
+      map.set(key, value); map.set(key + ':revision', revision + 1)
+      return { ok: true, revision: revision + 1 }
+    },
   }
 }
 
 export function indexedDbDocumentBackend(open = openLocalDb) {
+  async function versioned(key, value, expected, write = false) {
+    const db = await open()
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(DOCUMENT_STORE, write ? 'readwrite' : 'readonly')
+      const store = tx.objectStore(DOCUMENT_STORE)
+      let result
+      const revisionRequest = store.get(key + ':revision')
+      revisionRequest.onsuccess = () => {
+        const revision = revisionRequest.result || 0
+        if (write) {
+          if (revision !== expected) { result = { ok: false, conflict: true }; return }
+          store.put(value, key); store.put(revision + 1, key + ':revision')
+          result = { ok: true, revision: revision + 1 }
+        } else {
+          const request = store.get(key)
+          request.onsuccess = () => { result = { value: request.result ?? null, revision } }
+        }
+      }
+      tx.oncomplete = () => resolve(result)
+      tx.onerror = tx.onabort = () => reject(tx.error || new Error('工程存储事务失败'))
+    })
+  }
   return {
+    getVersioned: key => versioned(key),
+    compareSet: (key, value, expected) => versioned(key, value, expected, true),
     async get(key) { return withStore(await open(), DOCUMENT_STORE, 'readonly', store => store.get(key)) },
     async set(key, value) { await withStore(await open(), DOCUMENT_STORE, 'readwrite', store => store.put(value, key)) },
     async remove(key) { await withStore(await open(), DOCUMENT_STORE, 'readwrite', store => store.delete(key)) },
@@ -78,6 +109,12 @@ export function indexedDbDocumentBackend(open = openLocalDb) {
 /** 存储不可用只降级不打断编辑：读返回 { ok, value }，写与删除返回是否成功。 */
 export function createLocalStore(backend) {
   return {
+    async getVersioned(key) {
+      try { return { ok: true, ...(await backend.getVersioned(key)) } } catch (error) { return { ok: false, error } }
+    },
+    async compareSet(key, value, expected) {
+      try { return await backend.compareSet(key, value, expected) } catch (error) { return { ok: false, error } }
+    },
     async get(key) {
       try { return { ok: true, value: (await backend.get(key)) ?? null } } catch (error) { return { ok: false, value: null, error } }
     },
@@ -88,22 +125,6 @@ export function createLocalStore(backend) {
       try { await backend.remove(key); return true } catch { return false }
     },
   }
-}
-
-/**
- * 恢复工程：数据库里有就用它；只有数据库为空且存在旧 localStorage 数据时才迁移一次，
- * 并且只在写入成功后删除旧数据，避免迁移失败还丢掉旧工程。
- * 读数据库失败时返回 ok:false，由调用方决定提示与是否暂停自动保存。
- */
-export async function restoreScene({ store, readLegacy, clearLegacy = () => {}, key = SCENE_KEY }) {
-  const load = await store.get(key)
-  if (!load.ok) return { ok: false, error: load.error, project: null, migrated: false }
-  if (load.value) return { ok: true, project: load.value, migrated: false }
-  const legacy = readLegacy()
-  if (!legacy) return { ok: true, project: null, migrated: false }
-  const saved = await store.set(key, legacy)
-  if (saved) clearLegacy()
-  return { ok: true, project: legacy, migrated: saved }
 }
 
 export const localStore = createLocalStore(

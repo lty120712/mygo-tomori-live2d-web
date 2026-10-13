@@ -56,3 +56,38 @@ test('按创建时间倒序列出', async () => {
   const list = await store.list()
   assert.equal(list[0].name, 'b.mp3')
 })
+
+test('波形按素材缓存：并发只解码一次并写回元数据，非音频或缺失返回 null，删除后失效', async () => {
+  const backend = memoryBackend()
+  await backend.put('audio-1', { id: 'audio-1', kind: 'audio', name: 'a.wav', duration: 4 }, new Blob(['audio']))
+  await backend.put('image-1', { id: 'image-1', kind: 'image', name: 'a.png' }, new Blob(['image']))
+  let calls = 0
+  const store = createAssetStore(backend, {
+    probeImage: async () => ({ width: 1, height: 1 }),
+    probeAudio: async () => ({ duration: 4 }),
+    decodeWaveform: async () => { calls++; return { peaks: [0, .5, 1], duration: 4 } },
+  })
+  const [first, second] = await Promise.all([store.waveform('audio-1'), store.waveform('audio-1')])
+  assert.equal(calls, 1, '并发请求共用一次解码')
+  assert.deepEqual(first.peaks, [0, .5, 1])
+  assert.equal(second, first, '同一素材命中同一缓存')
+  assert.deepEqual((await backend.get('audio-1')).meta.peaks, [0, .5, 1], '解码结果写回素材元数据')
+  assert.equal(await store.waveform('image-1'), null, '图片素材没有波形')
+  assert.equal(await store.waveform('missing'), null, '缺失素材返回 null')
+  await store.remove('audio-1')
+  assert.equal(await store.waveform('audio-1'), null, '删除后缓存失效')
+  assert.equal(calls, 1)
+})
+
+test('导入时解码失败仍保留素材，首次显示波形时按需补算', async () => {
+  let calls = 0
+  const store = createAssetStore(memoryBackend(), {
+    probeAudio: async () => ({ duration: 2 }),
+    decodeWaveform: async () => { calls++; if (calls === 1) throw new Error('解码失败'); return { peaks: [1, 0], duration: 2 } },
+  })
+  const meta = await store.importFile({ type: 'audio/wav', name: 'a.wav', size: 8 })
+  assert.equal(calls, 1)
+  assert.equal(meta.peaks, undefined)
+  assert.deepEqual((await store.waveform(meta.id)).peaks, [1, 0])
+  assert.equal(calls, 2)
+})

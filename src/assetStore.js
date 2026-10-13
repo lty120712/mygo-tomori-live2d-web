@@ -1,5 +1,6 @@
 import { uid } from './sceneProject.js'
 import { ASSET_STORE, openLocalDb, withStore } from './localStore.js'
+import { decodeWaveform } from './audioWaveform.js'
 
 export const ASSET_LIMITS = { image: 64 * 1024 * 1024, audio: 512 * 1024 * 1024 }
 
@@ -83,6 +84,7 @@ export function createAssetStore(backend, options = {}) {
   const probeImageFn = options.probeImage || probeImage
   const probeAudioFn = options.probeAudio || probeAudio
   const urls = new Map()
+  const waveforms = new Map()
   let ready = false
 
   async function init() {
@@ -107,6 +109,9 @@ export function createAssetStore(backend, options = {}) {
     const id = uid('asset')
     const meta = { id, kind, name: file.name || '未命名', mimeType: file.type || '', size: file.size, createdAt: Date.now() }
     Object.assign(meta, kind === 'image' ? await probeImageFn(file) : await probeAudioFn(file))
+    if (kind === 'audio') {
+      try { Object.assign(meta, await (options.decodeWaveform || decodeWaveform)(file)) } catch { /* 不支持解码时仍保留素材 */ }
+    }
     await backend.put(id, meta, file)
     return meta
   }
@@ -120,6 +125,7 @@ export function createAssetStore(backend, options = {}) {
   async function remove(id) {
     await init()
     if (urls.has(id)) { URL.revokeObjectURL(urls.get(id)); urls.delete(id) }
+    waveforms.delete(id)
     await backend.delete(id)
   }
 
@@ -133,7 +139,32 @@ export function createAssetStore(backend, options = {}) {
     return u
   }
 
-  return { init, list, importFile, blob, remove, url }
+  async function waveform(id) {
+    if (!waveforms.has(id)) waveforms.set(id, (async () => {
+      const row = await backend.get(id)
+      if (!row || row.meta.kind !== 'audio') return null
+      if (row.meta.peaks?.length) return row.meta
+      try {
+        const result = await (options.decodeWaveform || decodeWaveform)(row.blob)
+        if (!result) return null
+        if (!(await backend.get(id))) return null
+        const meta = { ...row.meta, ...result }
+        await backend.put(id, meta, row.blob)
+        return meta
+      } catch { return null }
+    })())
+    return waveforms.get(id)
+  }
+
+  async function importFiles(files, onProgress = () => {}) {
+    const imported = [], failed = []
+    for (const [index, file] of Array.from(files).entries()) {
+      try { imported.push(await importFile(file)) } catch (error) { failed.push({ name: file.name, message: error.message }) }
+      onProgress(index + 1, files.length)
+    }
+    return { imported, failed }
+  }
+  return { init, list, importFile, importFiles, blob, remove, url, waveform }
 }
 
 // 浏览器默认单例

@@ -49,6 +49,7 @@
         <div class="track-lane audio-lane" tabindex="-1" @pointerdown.self="clickAudioLane($event)" @contextmenu.prevent.stop="openAudioAddMenu($event,lane)">
           <div v-for="clip in clipsOnAudioTrack(lane)" :key="clip.id" class="model-clip audio-clip" tabindex="0" :class="{selected:audioSelection===clip.id,multiselected:audioSelection===clip.id,muted:clip.muted}" :aria-label="'音频片段 '+clip.name" :title="audioTitle(clip)" :style="{left:clip.start/duration*100+'%',width:clip.duration/duration*100+'%'}" @contextmenu.prevent.stop="openAudioMenu($event,clip)" @pointerdown="beginAudio($event,clip,'move')" @pointermove="moveAudio" @pointerup="endAudio" @pointercancel="endAudio" @lostpointercapture="endAudio">
             <span class="trim-handle left" title="调整音频入点" @pointerdown.stop="beginAudio($event,clip,'left')"></span>
+            <AudioWaveform :clip="clip" />
             <span class="clip-name">{{clip.name}}</span><small>{{formatTimecode(clip.duration,fps)}}</small>
             <span class="trim-handle right" title="调整音频出点" @pointerdown.stop="beginAudio($event,clip,'right')"></span>
           </div>
@@ -166,6 +167,7 @@ import { copyKeyRefs,planKeyPaste } from '../keyframeClipboard.js'
 import { stepFrameTime } from '../sceneFrameRate.js'
 import { numericDisplay } from '../numericDisplay.js'
 import TimecodeInput from './TimecodeInput.vue'
+import AudioWaveform from './AudioWaveform.vue'
 import { formatTimecode } from '../timecode.js'
 import { editTimelineClip,timelineTicks } from '../timelineEditing.js'
 import { assetStore } from '../assetStore.js'

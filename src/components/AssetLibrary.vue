@@ -1,5 +1,5 @@
 <template>
-  <aside class="asset-library" :class="{collapsed:!open}" :aria-label="activeTab==='model' ? '模型素材库' : '素材库'">
+  <aside class="asset-library" :class="{collapsed:!open,dragging}" :aria-label="activeTab==='model' ? '模型素材库' : '素材库'" @dragenter.prevent="enterDrop" @dragover.prevent="overDrop" @dragleave.prevent="leaveDrop" @drop.prevent="dropFiles">
     <div v-show="!open" class="asset-rail"><button class="rail-trigger" aria-label="展开素材库" title="展开素材库" @click="emit('toggle')"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><path d="M17.5 14v7M14 17.5h7"/></svg><span>素材</span></button></div>
     <div v-show="open" class="library-body">
       <header><div><small>ASSETS</small><h3>素材库</h3></div><button class="collapse-trigger" aria-label="收起素材库" title="收起素材库，为画布留出空间" @click="emit('toggle')">‹</button></header>
@@ -28,8 +28,8 @@
 
       <template v-else>
         <div class="media-toolbar">
-          <button class="import-btn" @click="pickFile">导入{{ activeTab==='image' ? '图片' : '音频' }}</button>
-          <input ref="fileInput" type="file" hidden :accept="activeTab==='image' ? 'image/*' : 'audio/*'" @change="onFilePicked" />
+          <button class="import-btn" :disabled="disabled || importing" @click="pickFile">{{ importing ? '正在导入…' : '批量导入'+(activeTab==='image' ? '图片' : '音频') }}</button>
+          <input ref="fileInput" type="file" multiple hidden :accept="activeTab==='image' ? 'image/*' : 'audio/*'" @change="onFilePicked" />
           <span class="media-hint">保存在本浏览器，可跨工程复用</span>
         </div>
         <div class="library-results">
@@ -44,22 +44,26 @@
           </div>
           <div v-if="!currentAssets.length" class="library-empty"><span>还没有{{ activeTab==='image' ? '图片' : '音频' }}素材</span><button @click="pickFile">导入一个</button></div>
         </div>
-        <footer><span class="hint-dot"></span>导入的素材保存在浏览器本地</footer>
+        <footer><span class="hint-dot"></span>可拖入多个图片或音频文件</footer>
       </template>
     </div>
+    <div v-if="dragging" class="drop-overlay">松开导入图片／音频</div>
+    <p v-if="importMessage && open" class="import-status" role="status">{{ importMessage }}</p>
   </aside>
 </template>
 <script setup>
-import { computed, ref, watch, onMounted } from 'vue'
+import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import ModelPortrait from './ModelPortrait.vue'
 import { describeModel, filterModelLibrary } from '../modelLibrary.js'
 import { assetStore } from '../assetStore.js'
-const props = defineProps({ models: { type: Array, default: () => [] }, clips: { type: Array, default: () => [] }, backgroundClips: { type: Array, default: () => [] }, open: Boolean, disabled: Boolean })
+const props = defineProps({ models: { type: Array, default: () => [] }, clips: { type: Array, default: () => [] }, audioClips: { type: Array, default: () => [] }, backgroundClips: { type: Array, default: () => [] }, open: Boolean, disabled: Boolean })
 const emit = defineEmits(['toggle', 'add', 'add-image', 'background-image', 'add-audio'])
-const referenced = asset => props.clips.some(c => c.assetId === asset.id) || props.backgroundClips.some(c => c.assetId === asset.id)
+const referenced = asset => [...props.clips, ...props.backgroundClips, ...props.audioClips].some(c => c.assetId === asset.id)
 const activeTab = ref('model')
 const assets = ref([])
 const fileInput = ref(null)
+const importing = ref(false), importMessage = ref(''), dragging = ref(false)
+let dragDepth = 0
 
 const character = ref(''), outfit = ref(''), version = ref(''), search = ref('')
 const catalog = computed(() => props.models.map(describeModel))
@@ -77,17 +81,34 @@ function switchTab(tab) { activeTab.value = tab; refreshAssets() }
 async function refreshAssets() { try { assets.value = await assetStore.list() } catch { assets.value = [] } }
 function pickFile() { fileInput.value && fileInput.value.click() }
 async function onFilePicked(event) {
-  const file = event.target.files && event.target.files[0]
+  const files = Array.from(event.target.files || [])
   event.target.value = ''
-  if (!file) return
-  try { await assetStore.importFile(file); refreshAssets() }
-  catch (e) { alert(e.message || '导入失败') }
+  await importFiles(files)
 }
+async function importFiles(files) {
+  if (!files.length || props.disabled || importing.value) return
+  importing.value = true
+  try {
+    const result = await assetStore.importFiles(files, (done,total) => { importMessage.value = `正在导入 ${done} / ${total}` })
+    await refreshAssets()
+    if (result.imported.length) activeTab.value = result.imported[0].kind
+    importMessage.value = `已导入 ${result.imported.length} 个素材` + (result.failed.length ? '；失败：' + result.failed.map(f => f.name+'（'+f.message+'）').join('、') : '')
+  } catch (error) { importMessage.value = '导入失败：' + error.message }
+  finally { importing.value = false }
+}
+function enterDrop(event) { if (event.dataTransfer?.types.includes('Files')) { dragDepth++; dragging.value = !props.disabled && !importing.value } }
+function overDrop(event) { if (event.dataTransfer) event.dataTransfer.dropEffect = props.disabled || importing.value ? 'none' : 'copy' }
+function leaveDrop() { if (--dragDepth <= 0) { dragDepth = 0; dragging.value = false } }
+function dropFiles(event) { dragging.value = false; dragDepth = 0; importFiles(Array.from(event.dataTransfer?.files || [])) }
 async function removeAsset(a) { if(props.disabled || referenced(a))return; if (confirm('删除素材「' + a.name + '」？')) { await assetStore.remove(a.id); refreshAssets() } }
 function formatSize(size) { if (size >= 1048576) return (size / 1048576).toFixed(1) + 'MB'; if (size >= 1024) return Math.round(size / 1024) + 'KB'; return size + 'B' }
-onMounted(refreshAssets)
+onMounted(() => { refreshAssets(); window.addEventListener('tomori-assets-changed', refreshAssets) })
+onBeforeUnmount(() => window.removeEventListener('tomori-assets-changed', refreshAssets))
 </script>
 <style scoped>
+.asset-library { position:relative; }
+.drop-overlay { position:absolute; inset:0; display:grid; place-items:center; background:var(--editor-panel); border:2px dashed var(--editor-accent); z-index:5; pointer-events:none; }
+.import-status { position:absolute; bottom:36px; left:8px; right:8px; padding:8px; margin:0; font-size:11px; background:var(--editor-panel); border:1px solid var(--editor-border); border-radius:8px; max-height:100px; overflow:auto; overflow-wrap:anywhere; }
 .asset-library { width:280px; flex-shrink:0; box-sizing:border-box; background:var(--editor-panel); color:var(--editor-text); border-right:1px solid var(--editor-border); min-height:0; font-family:inherit; }
 .asset-library.collapsed { width:52px; background:var(--editor-soft); }
 .library-body { height:100%; display:flex; flex-direction:column; min-height:0; }

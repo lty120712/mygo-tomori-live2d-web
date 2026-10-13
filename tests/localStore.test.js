@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { ASSET_STORE, DOCUMENT_STORE, LEGACY_SCENE_KEY, LOCAL_DB_NAME, LOCAL_DB_VERSION, SCENE_KEY, createLocalStore, indexedDbDocumentBackend, memoryDocumentBackend, openLocalDb, restoreScene, withStore } from '../src/localStore.js'
+import { ASSET_STORE, DOCUMENT_STORE, LEGACY_SCENE_KEY, LOCAL_DB_NAME, LOCAL_DB_VERSION, SCENE_KEY, createLocalStore, indexedDbDocumentBackend, memoryDocumentBackend, openLocalDb, withStore } from '../src/localStore.js'
 
 // 用最小假实现覆盖 IndexedDB 请求 / 事务回调，避免测试依赖浏览器。
 function fakeDb(calls) {
@@ -82,38 +82,3 @@ test('数据库升级被其它标签页占用时立刻报错而不是一直等�
   await assert.rejects(() => openLocalDb(factory), /其它 Tomori Studio 标签页/)
 })
 
-test('恢复工程：数据库优先，旧 localStorage 数据只在数据库为空时迁移一次', async () => {
-  const store = createLocalStore(memoryDocumentBackend())
-  const legacy = { version: 3, duration: 15, clips: [1, 2, 3] }
-  let cleared = 0
-  const first = await restoreScene({ store, readLegacy: () => legacy, clearLegacy: () => { cleared++ } })
-  assert.deepEqual(first, { ok: true, project: legacy, migrated: true })
-  assert.equal(cleared, 1)
-  assert.deepEqual((await store.get(SCENE_KEY)).value, legacy)
-  let readLegacyCalls = 0
-  const second = await restoreScene({ store, readLegacy: () => { readLegacyCalls++; return legacy }, clearLegacy: () => { cleared++ } })
-  assert.deepEqual(second, { ok: true, project: legacy, migrated: false })
-  assert.equal(readLegacyCalls, 0)
-  assert.equal(cleared, 1)
-})
-
-test('恢复工程：写入失败时保留旧数据，读失败时不写不迁移', async () => {
-  const legacy = { version: 3, clips: [] }
-  let cleared = 0
-  const failingWrite = createLocalStore({ get: async () => null, set: async () => { throw new Error('quota') }, remove: async () => {} })
-  const failed = await restoreScene({ store: failingWrite, readLegacy: () => legacy, clearLegacy: () => { cleared++ } })
-  assert.deepEqual(failed, { ok: true, project: legacy, migrated: false })
-  assert.equal(cleared, 0)
-  let writes = 0
-  const failingRead = createLocalStore({ get: async () => { throw new Error('denied') }, set: async () => { writes++ }, remove: async () => {} })
-  const blockedResult = await restoreScene({ store: failingRead, readLegacy: () => legacy, clearLegacy: () => { cleared++ } })
-  assert.equal(blockedResult.ok, false)
-  assert.equal(String(blockedResult.error.message), 'denied')
-  assert.equal(writes, 0)
-  assert.equal(cleared, 0)
-})
-
-test('恢复工程：数据库与旧数据都为空时保持空工程', async () => {
-  const store = createLocalStore(memoryDocumentBackend())
-  assert.deepEqual(await restoreScene({ store, readLegacy: () => null }), { ok: true, project: null, migrated: false })
-})

@@ -37,6 +37,7 @@ export function createAudioScheduler(options = {}) {
   let context = null, master = null, mixer = null, sources = []
   let clips = [], trackState = {}
   let started = false
+  let epoch = 0
 
   function ensure() {
     if (!context) {
@@ -54,17 +55,21 @@ export function createAudioScheduler(options = {}) {
   function buffer(assetId) {
     if (buffers.has(assetId)) return Promise.resolve(buffers.get(assetId))
     if (!decoding.has(assetId)) {
-      decoding.set(assetId, Promise.resolve()
+      const decodingContext = context
+      const pending = Promise.resolve()
         .then(() => loadFile(assetId))
         .then(async file => {
+          if (context !== decodingContext) return null
           if (!file) { problems.add(assetId); return null }
-          const decoded = await decode(context, file)
+          const decoded = await decode(decodingContext, file)
+          if (context !== decodingContext) return null
           if (decoded) buffers.set(assetId, decoded)
           else problems.add(assetId)
           return decoded || null
         })
-        .catch(() => { problems.add(assetId); return null })
-        .finally(() => decoding.delete(assetId)))
+        .catch(() => { if (context === decodingContext) problems.add(assetId); return null })
+        .finally(() => { if (decoding.get(assetId) === pending) decoding.delete(assetId) })
+      decoding.set(assetId, pending)
     }
     return decoding.get(assetId)
   }
@@ -76,15 +81,21 @@ export function createAudioScheduler(options = {}) {
 
   /** 按给定播放头时间重新排一遍音源：先全部解出缓冲，再统一从一个时刻起播。 */
   async function play(time = 0) {
-    await ensure()
+    const request = ++epoch
+    started = true
     stopAll()
-    const plan = planAudioPlayback(clips, time, { trackState })
+    await ensure()
+    if (request !== epoch) return []
+    const anchor = context.currentTime
+    let plan = planAudioPlayback(clips, time, { trackState, includeFuture: true })
     if (!plan.length) { started = true; return [] }
-    const decoded = await Promise.all(plan.map(entry => buffer(entry.assetId)))
-    if (!context) return []
-    const when = context.currentTime + lookahead
-    plan.forEach((entry, index) => {
-      const audioBuffer = decoded[index]
+    await Promise.all(plan.map(entry => buffer(entry.assetId)))
+    if (!context || request !== epoch) return []
+    plan = planAudioPlayback(clips, time + context.currentTime - anchor, { trackState, includeFuture: true })
+    const base = context.currentTime + lookahead
+    plan.forEach(entry => {
+      const when = base + entry.delay
+      const audioBuffer = buffers.get(entry.assetId)
       if (!audioBuffer || entry.duration <= 0) return
       const source = context.createBufferSource()
       source.buffer = audioBuffer
@@ -107,6 +118,7 @@ export function createAudioScheduler(options = {}) {
   }
 
   function pause() {
+    epoch++
     stopAll()
     started = false
   }
@@ -123,6 +135,7 @@ export function createAudioScheduler(options = {}) {
   }
 
   function destroy() {
+    epoch++
     stopAll()
     started = false
     buffers.clear()
@@ -140,6 +153,10 @@ export function createAudioScheduler(options = {}) {
     pause,
     seek,
     resume: ensure,
+    async prepare() {
+      await ensure()
+      await Promise.all(clips.map(clip => buffer(clip.assetId)))
+    },
     destroy,
     get problems() { return [...problems] },
     get playing() { return started },

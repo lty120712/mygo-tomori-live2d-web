@@ -42,17 +42,66 @@ function setup(clips, options = {}) {
   return { ctx, created, decoded, scheduler }
 }
 
-test('播放只调度覆盖播放头的片段，起点与剩余时长按计划决定', async () => {
+test('播放同时调度当前与后续片段，未来片段到起点才发声', async () => {
   const a = createAudioClip(asset, 0, 5, 0), b = createAudioClip(asset, 6, 3, 1)
   const { created, scheduler } = setup([a, b])
   const plan = await scheduler.play(2)
-  assert.equal(plan.length, 1)
-  assert.equal(created.sources.length, 1)
+  assert.equal(plan.length, 2)
+  assert.equal(created.sources.length, 2)
+  assert.deepEqual(created.sources[1].started, [14.03, 0, 3])
   assert.equal(created.sources[0].started[0], 10.03)
   assert.equal(created.sources[0].started[1], 2)
   assert.equal(created.sources[0].started[2], 3)
   // gains[0] 是主增益，片段自己的增益从 1 开始
   assert.deepEqual(created.gains[1].gain.calls, [['set', 1, 10.03]])
+})
+
+test('解码期间暂停或销毁，迟到的结果不能重启音源', async () => {
+  for (const action of ['pause', 'destroy']) {
+    let finish, entered
+    const pending = new Promise(resolve => { finish = resolve })
+    const decoding = new Promise(resolve => { entered = resolve })
+    const { scheduler, created } = setup([createAudioClip(asset, 0, 10, 0)], {
+      decode: async () => { entered(); await pending; return { duration: 12 } },
+    })
+    const playing = scheduler.play(0)
+    await decoding
+    scheduler[action]()
+    finish()
+    assert.deepEqual(await playing, [])
+    assert.equal(created.sources.length, 0)
+    assert.equal(scheduler.playing, false)
+    assert.deepEqual(scheduler.problems, [])
+  }
+})
+
+test('解码中切换播放头只允许最后一次请求启动，未来片段按新起点重新安排', async () => {
+  let finish, entered
+  const pending = new Promise(resolve => { finish = resolve })
+  const decoding = new Promise(resolve => { entered = resolve })
+  const { scheduler, created } = setup([createAudioClip(asset, 0, 10, 0), createAudioClip(asset, 12, 3, 1)], {
+    decode: async () => { entered(); await pending; return { duration: 20 } },
+  })
+  const first = scheduler.play(0)
+  await decoding
+  const second = scheduler.seek(4)
+  finish()
+  assert.deepEqual(await first, [])
+  const plan = await second
+  assert.equal(plan.length, 2)
+  assert.deepEqual(created.sources.map(s => s.started), [[10.03, 4, 6], [18.03, 0, 3]])
+})
+
+test('冷启动先准备混音流；解码耗时后起播位置追上播放时钟', async () => {
+  const { scheduler, ctx, created } = setup([createAudioClip(asset, 0, 10, 0)], {
+    decode: async () => { ctx.currentTime += 2; return { duration: 12 } },
+  })
+  await scheduler.play(0)
+  assert.deepEqual(created.sources[0].started, [12.03, 2, 8])
+  scheduler.pause()
+  await scheduler.prepare()
+  assert.equal(scheduler.stream.getAudioTracks().length, 1)
+  assert.equal(scheduler.playing, false)
 })
 
 test('多条轨道同时出声，淡入淡出窗口按剩余时间截断', async () => {
