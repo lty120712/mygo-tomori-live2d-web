@@ -1,5 +1,7 @@
 import { visualClips, visualLayerFilter, createImageClip, appendVisualClips, visualClipLimit, backgroundAtTime, backgroundClipLimit, createClipFromTemplate, createColorBackgroundClip, createImageBackgroundClip, planBackgroundAdd, migrateLegacyBackground, AUDIO_TRACK_LIMIT, audioClipLimit, audioClipPlacement, audioClipTemplate, createAudioClip, createAudioClipFromTemplate, splitAudioClip } from '../mediaTracks.js'
 import { createAudioScheduler } from '../audioScheduler.js'
+import { normalizeVolumeKeyframes } from '../audioVolume.js'
+import { normalizeAudioFilter } from '../audioFilters.js'
 import { assetStore } from '../assetStore.js'
 import { LEGACY_SCENE_KEY, localStore } from '../localStore.js'
 import { createScenePersistence } from '../scenePersistence.js'
@@ -321,8 +323,10 @@ export function useSceneEditor() {
     next.volume=Math.max(0,Math.min(1,next.volume ?? 1))
     next.fadeIn=Math.max(0,Math.min(next.duration,next.fadeIn || 0))
     next.fadeOut=Math.max(0,Math.min(next.duration,next.fadeOut || 0))
+    next.filter=normalizeAudioFilter(next.filter)
+    next.volumeKeyframes=normalizeVolumeKeyframes(next.volumeKeyframes)
     if(!audioTrackFree(next.track,next.start,next.duration,id)){message.value='音频轨道 '+(next.track+1)+' 在这个时间段已有片段；请换一条轨道或调整时长';return false}
-    Object.assign(clip,{start:next.start,duration:next.duration,offset:next.offset,volume:next.volume,fadeIn:next.fadeIn,fadeOut:next.fadeOut})
+    Object.assign(clip,{start:next.start,duration:next.duration,offset:next.offset,volume:next.volume,fadeIn:next.fadeIn,fadeOut:next.fadeOut,filter:next.filter,volumeKeyframes:next.volumeKeyframes})
     return true
   }
   function pasteAudioClip(template){

@@ -1,13 +1,14 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { AUDIO_CLIP_LIMIT, AUDIO_TRACK_LIMIT, audibleAudioClips, audioClipLimit, audioClipPlacement, audioClipTemplate, audioClipsAtTime, audioGainAt, createAudioClip, createAudioClipFromTemplate, planAudioPlayback, splitAudioClip } from '../src/mediaTracks.js'
+import { AUDIO_CLIP_LIMIT, AUDIO_TRACK_LIMIT, audibleAudioClips, audioClipLimit, audioClipPlacement, audioClipTemplate, audioClipsAtTime, audioFilterSpec, audioGainAt, createAudioClip, createAudioClipFromTemplate, planAudioPlayback, splitAudioClip } from '../src/mediaTracks.js'
+import { sourceAtTimeline, volumeEnvelopeAt } from '../src/audioVolume.js'
 
 const asset = { id: 'song', name: '主题曲.mp3', kind: 'audio', duration: 12 }
 const song = (start = 0, duration = 5, track = 0) => createAudioClip(asset, start, duration, track)
 
 test('音频片段字段与默认值，上限 32 个、轨道 0–7', () => {
   const clip = song(1, 4, 2)
-  assert.deepEqual({ ...clip, id: undefined }, { id: undefined, assetId: 'song', name: '主题曲.mp3', track: 2, start: 1, duration: 4, offset: 0, volume: 1, fadeIn: 0, fadeOut: 0 })
+  assert.deepEqual({ ...clip, id: undefined }, { id: undefined, assetId: 'song', name: '主题曲.mp3', track: 2, start: 1, duration: 4, offset: 0, volume: 1, fadeIn: 0, fadeOut: 0, filter: 'none', volumeKeyframes: [] })
   assert.equal(AUDIO_CLIP_LIMIT, 32)
   assert.equal(AUDIO_TRACK_LIMIT, 8)
   assert.equal(audioClipLimit(Array.from({ length: 31 }, () => song())), '')
@@ -39,9 +40,12 @@ test('播放计划从中点起播时前移源偏移、缩短剩余时长并按�
   const clip = { ...song(2, 6, 1), volume: .7, fadeIn: 4, fadeOut: 2, offset: 1 }
   const plan = planAudioPlayback([clip], 5, 30)
   assert.equal(plan.length, 1)
-  const { gain, ...rest } = plan[0]
+  const { gain, cues, filter, ...rest } = plan[0]
   assert.deepEqual({ ...rest, id: undefined }, { id: undefined, assetId: 'song', name: '主题曲.mp3', track: 1, offset: 4, duration: 3, delay: 0, volume: .7, fadeIn: 1, fadeOut: 2 })
   assert.ok(Math.abs(gain - .525) < 1e-9)
+  assert.equal(filter, 'none')
+  // 淡入到 6 秒处回到 volume .7，再从 6 秒线性淡出到 8 秒的 0（两段延时都以起播时刻为基准）
+  assert.deepEqual(cues, [{ delay: 1, value: .7 }, { delay: 3, value: 0 }])
   assert.deepEqual(planAudioPlayback([clip], 2, 30)[0].offset, 1)
   assert.deepEqual(planAudioPlayback([clip], 8, 30), [])
   // 已经播完淡入窗口时不再安排淡入
@@ -57,10 +61,38 @@ test('播放计划按时间排序，多个轨道同时出声', () => {
 })
 
 test('复制音频片段带走素材与时长，粘贴可换轨道', () => {
-  const template = audioClipTemplate({ ...song(3, 2.5, 1), volume: .6, fadeIn: .5 })
-  assert.deepEqual(template, { assetId: 'song', name: '主题曲.mp3', duration: 2.5, volume: .6, fadeIn: .5, fadeOut: 0, offset: 0 })
+  const template = audioClipTemplate({ ...song(3, 2.5, 1), volume: .6, fadeIn: .5, filter: 'bandpass', volumeKeyframes: [{ time: 3, value: .2, easing: 'linear' }] })
+  assert.deepEqual(template, { assetId: 'song', name: '主题曲.mp3', duration: 2.5, volume: .6, fadeIn: .5, fadeOut: 0, offset: 0, filter: 'bandpass', volumeKeyframes: [{ time: 3, value: .2, easing: 'linear' }] })
   const pasted = createAudioClipFromTemplate(template, 6, 2, 2)
-  assert.deepEqual({ ...pasted, id: undefined }, { id: undefined, assetId: 'song', name: '主题曲.mp3', track: 2, start: 6, duration: 2, offset: 0, volume: .6, fadeIn: .5, fadeOut: 0 })
+  assert.deepEqual({ ...pasted, id: undefined }, { id: undefined, assetId: 'song', name: '主题曲.mp3', track: 2, start: 6, duration: 2, offset: 0, volume: .6, fadeIn: .5, fadeOut: 0, filter: 'bandpass', volumeKeyframes: [{ time: 3, value: .2, easing: 'linear' }] })
+  // 复制出去的模板与原片段不共享关键帧数组，粘贴后改一个不会串改另一个
+  assert.notEqual(pasted.volumeKeyframes, template.volumeKeyframes)
+})
+
+test('音量关键帧与滤镜进入播放计划：包络折点按延时排好，滤镜用预设参数', () => {
+  const clip = { ...song(0, 10, 0), filter: 'lowpass', volumeKeyframes: [{ time: 2, value: .2, easing: 'linear' }, { time: 6, value: 1, easing: 'linear' }] }
+  const plan = planAudioPlayback([clip], 0, 30)[0]
+  assert.equal(plan.gain, .2)
+  assert.equal(plan.filter, 'lowpass')
+  assert.deepEqual(plan.cues, [{ delay: 2, value: .2 }, { delay: 6, value: 1 }])
+  assert.deepEqual(audioFilterSpec('lowpass'), { value: 'lowpass', label: '低通 · 闷', type: 'lowpass', frequency: 1200, q: .7 })
+  assert.deepEqual(audioFilterSpec('不认识'), audioFilterSpec('none'))
+})
+
+test('切割音频片段时按切点拆分音量关键帧，两侧各补一个切点关键帧', () => {
+  const clip = { ...createAudioClip(asset, 0, 10, 0), offset: 2, volumeKeyframes: [{ time: 2, value: 0, easing: 'linear' }, { time: 8, value: 1, easing: 'linear' }] }
+  const before = clip.volumeKeyframes.map(key => ({ ...key }))
+  const right = splitAudioClip(clip, 5)
+  // 切点素材时间是 2 + (5 - 0) = 7，包络在 7 秒处是 (7-2)/(8-2) = 0.8333
+  const round = list => list.map(key => ({ ...key, value: Math.round(key.value * 1e5) / 1e5 }))
+  assert.deepEqual(round(clip.volumeKeyframes), [{ time: 2, value: 0, easing: 'linear' }, { time: 7, value: .83333, easing: 'linear' }])
+  assert.deepEqual(round(right.volumeKeyframes), [{ time: 7, value: .83333, easing: 'linear' }, { time: 8, value: 1, easing: 'linear' }])
+  // 右半段接在原位继续，切点之后的包络与切割前逐点一致（切点落在斜线上也不丢形状）
+  for (const time of [5, 5.5, 7, 9]) {
+    const source = sourceAtTimeline(right, time)
+    assert.ok(Math.abs(audioGainAt(right, time) - volumeEnvelopeAt(before, source)) < 1e-9, time + ' 秒处的包络应与切割前一致')
+  }
+  assert.equal(audioGainAt(right, 5), 5 / 6)
 })
 
 test('切割音频片段：右半段前移源偏移，淡入留前半、淡出留后半，边界外拒绝', () => {

@@ -54,6 +54,7 @@
             <span class="clip-name">{{clip.name}}</span><small>{{formatTimecode(clip.duration,fps)}}</small>
             <span class="trim-handle right" title="调整音频出点" @pointerdown.stop="beginAudio($event,clip,'right')"></span>
             <span class="audio-scrub" title="拖动波形定位播放头（吸附节拍）；拖动上方标签条移动片段" @pointerdown.stop="scrubAudio($event,clip)" @contextmenu.prevent.stop="openAudioMenu($event,clip)"></span>
+            <span v-for="key in visibleVolumeKeys(clip)" :key="clip.id+'-vk-'+key.source" class="audio-volume-key" :aria-label="'音量关键帧 '+Math.round(key.value*100)+'%'" :style="{left:(key.time-clip.start)/clip.duration*100+'%',bottom:'calc(3px + (100% - 20px) * '+key.value+')'}" :title="'音量关键帧 · '+formatTimecode(key.time,fps)+' · '+Math.round(key.value*100)+'%'+(key.easing==='linear' ? '' : ' · '+easingLabel(key.easing))+' · 上下拖动改音量，左右拖动改时间'" @pointerdown.stop="beginVolumeKey($event,clip,key)"></span>
           </div>
           <b v-if="snapTime!==null" class="snap-guide" :style="{left:snapTime/duration*100+'%'}"></b><b class="playhead" :style="{left:time/duration*100+'%'}"></b>
         </div>
@@ -144,7 +145,16 @@
           <label>音量 %<input aria-label="音频音量" type="number" min="0" max="100" step="1" v-model.number="audioMenuVolume" /></label>
           <label>淡入 秒<input aria-label="音频淡入" type="number" min="0" step="0.1" v-model.number="audioMenuFadeIn" /></label>
           <label>淡出 秒<input aria-label="音频淡出" type="number" min="0" step="0.1" v-model.number="audioMenuFadeOut" /></label>
-          <button role="menuitem" @click="applyAudioMenu">应用音量与淡入淡出</button>
+          <label>滤镜<select aria-label="音频滤镜" v-model="audioMenuFilter"><option v-for="preset in AUDIO_FILTER_PRESETS" :key="preset.value" :value="preset.value">{{preset.label}}</option></select></label>
+          <button role="menuitem" @click="applyAudioMenu">应用音量、淡入淡出与滤镜</button>
+        </fieldset>
+        <fieldset class="menu-edit-fields" :disabled="disabled">
+          <label>关键帧音量 %<input aria-label="音量关键帧数值" type="number" min="0" max="100" step="1" v-model.number="audioMenuKeyValue" /></label>
+          <label>缓动<select aria-label="音量关键帧缓动" v-model="audioMenuKeyEasing"><option v-for="preset in EASING_PRESETS" :key="preset.value" :value="preset.value">{{preset.label}}</option></select></label>
+          <button role="menuitem" :disabled="!playheadCoversClip(menu.audio)" @click="applyVolumeKeyframe">在播放头添加或更新关键帧</button>
+          <button role="menuitem" :disabled="!audioMenuKeyframe" @click="removePlayheadVolumeKeyframe">删除播放头处关键帧</button>
+          <button role="menuitem" :disabled="!(menu.audio.volumeKeyframes || []).length" @click="clearVolumeKeyframes">清空音量关键帧</button>
+          <small class="menu-hint">关键帧记录素材内的音量包络，与总音量、淡入淡出相乘；时间线上拖动菱形可改时间与音量。</small>
         </fieldset>
         <span class="menu-section">音频片段 · {{menu.audio.name}}</span>
         <button role="menuitem" :disabled="disabled" @click="copyAudioClip()">复制音频片段<kbd>Ctrl+C</kbd></button>
@@ -174,6 +184,8 @@ import { formatTimecode } from '../timecode.js'
 import { editTimelineClip,timelineTicks } from '../timelineEditing.js'
 import { assetStore } from '../assetStore.js'
 import { collectBeats,snapToBeats } from '../audioBeats.js'
+import { AUDIO_FILTER_PRESETS, audioFilterLabel, normalizeAudioFilter } from '../audioFilters.js'
+import { nearestVolumeKeyframe, normalizeVolumeKeyframes, removeVolumeKeyframe, setVolumeKeyframe, sourceAtTimeline, timelineAtSource, visibleVolumeKeys } from '../audioVolume.js'
 import { groupedClipKeys,visibleClipKeys,uniqueKeyRefs,planKeyRefMove } from '../timelineKeyframes.js'
 const props=defineProps({clips:Array,backgroundClips:{type:Array,default:()=>[]},audioClips:{type:Array,default:()=>[]},audioTrackState:{type:Object,default:()=>({})},selectedIds:Array,duration:Number,fps:Number,time:Number,selectedId:String,selected:Object,labels:Object,pose:Object,runtimes:Object,transformFields:Array,disabled:Boolean,navigationDisabled:Boolean})
 const emit=defineEmits(['selection-change','clear-selection','batch-clips','batch-keys','select','seek','layer-state','background-track-state','audio-track-state','rename-layer','reorder-layer','edit-clip','remove-key','move-key','toggle-key','edit-key-value','edit-event','paste-event','remove-event','begin-edit','end-edit','delete-selected','add-background-color','background-edit','delete-background','split-background','background-image','import-background-image','paste-background','add-audio','import-audio','audio-edit','delete-audio','split-audio','paste-audio'])
@@ -353,7 +365,8 @@ async function loadBeats(assetId){
   if(!assetId || beatRequests.has(assetId) || assetId in beatsByAsset.value)return
   beatRequests.add(assetId)
   let times=null
-  try{times=await assetStore.beats(assetId)}catch{times=null}
+  // 失败也要释放请求标记，否则一次解码失败会让这段素材永远不再尝试节拍。
+  try{times=await assetStore.beats(assetId)}catch{times=null}finally{beatRequests.delete(assetId)}
   if(times?.length)beatsByAsset.value={...beatsByAsset.value,[assetId]:times}
 }
 watch(()=>props.audioClips.map(c=>c.assetId).join('|'),()=>{for(const clip of props.audioClips)loadBeats(clip.assetId)},{immediate:true})
@@ -369,6 +382,7 @@ function moveSeek(e){
   if(drag){move(e);return}
   if(backgroundDrag){moveBackground(e);return}
   if(audioDrag){moveAudio(e);return}
+  if(volumeKeyDrag){moveVolumeKey(e);return}
   if(layerDrag){moveLayerDrag(e);return}
   if(eventDrag){moveEvent(e);return}
   if(keyDrag){moveKey(e);return}
@@ -379,6 +393,7 @@ function endSeek(e){
   if(drag)end()
   if(backgroundDrag)endBackground()
   if(audioDrag)endAudio()
+  if(volumeKeyDrag)endVolumeKey()
   if(layerDrag)endLayerDrag(e)
   if(eventDrag)endEvent()
   if(keyDrag)endKey()
@@ -468,6 +483,13 @@ const selectedAudioClip=computed(()=>props.audioClips.find(c=>c.id===audioSelect
 const backgroundClipboard=ref(null)
 const audioSelection=ref(''),audioClipboard=ref(null)
 const audioMenuVolume=ref(100),audioMenuFadeIn=ref(0),audioMenuFadeOut=ref(0)
+const audioMenuFilter=ref('none'),audioMenuKeyValue=ref(100),audioMenuKeyEasing=ref('linear')
+/** 播放头落在片段的时间范围内（含两端），音量关键帧按这一刻的素材内时间读写。 */
+function playheadCoversClip(clip){return !!clip && props.time>=clip.start-1e-8 && props.time<=clip.start+clip.duration+1e-8}
+const audioMenuKeyframe=computed(()=>{
+  const clip=menu.value?.kind==='audio' ? menu.value.audio : null
+  return clip && playheadCoversClip(clip) ? nearestVolumeKeyframe(clip.volumeKeyframes,sourceAtTimeline(clip,props.time)) : null
+})
 const audioTracks=computed(()=>{
   const used=[...new Set(props.audioClips.map(c=>c.track))].sort((a,b)=>a-b)
   // 始终多留一条空轨，方便把片段放到新轨道上叠放；没有任何片段时也能直接选第 2 条轨道
@@ -480,17 +502,51 @@ function audioTitle(clip){
   const parts=[formatTimecode(clip.start,props.fps)+' → '+formatTimecode(clip.start+clip.duration,props.fps),'音量 '+Math.round((clip.volume ?? 1)*100)+'%']
   if(clip.fadeIn)parts.push('淡入 '+clip.fadeIn.toFixed(1)+' 秒')
   if(clip.fadeOut)parts.push('淡出 '+clip.fadeOut.toFixed(1)+' 秒')
-  return clip.name+' · '+parts.join(' · ')+' · 拖动标签条移动，拖波形定位播放头；两端裁剪；右键编辑'
+  if(normalizeAudioFilter(clip.filter)!=='none')parts.push('滤镜 '+audioFilterLabel(clip.filter))
+  const keys=normalizeVolumeKeyframes(clip.volumeKeyframes).length
+  if(keys)parts.push('音量关键帧 '+keys+' 个')
+  return clip.name+' · '+parts.join(' · ')+' · 拖动标签条移动，拖波形定位播放头，拖菱形改关键帧；两端裁剪；右键编辑'
 }
 const audioAssetList=()=>assetStore.list().then(list=>list.filter(asset=>asset.kind==='audio')).catch(()=>[])
 async function openAudioAddMenu(e,track){if(props.disabled)return;positionMenu(e,{kind:'audio-add',track,title:'添加音频',assets:await audioAssetList()})}
 function addAudioClip(asset,track){if(props.disabled || !asset)return;emit('add-audio',asset,track);closeMenu()}
 function importAudio(track){if(props.disabled)return;emit('import-audio',track);closeMenu()}
-function openAudioMenu(e,clip){if(props.disabled)return;audioSelection.value=clip.id;audioMenuVolume.value=Math.round((clip.volume ?? 1)*100);audioMenuFadeIn.value=clip.fadeIn || 0;audioMenuFadeOut.value=clip.fadeOut || 0;positionMenu(e,{kind:'audio',title:'音频片段 · '+clip.name,audio:clip})}
+function openAudioMenu(e,clip){
+  if(props.disabled)return
+  audioSelection.value=clip.id
+  audioMenuVolume.value=Math.round((clip.volume ?? 1)*100)
+  audioMenuFadeIn.value=clip.fadeIn || 0
+  audioMenuFadeOut.value=clip.fadeOut || 0
+  audioMenuFilter.value=normalizeAudioFilter(clip.filter)
+  const nearest=nearestVolumeKeyframe(clip.volumeKeyframes,sourceAtTimeline(clip,props.time))
+  audioMenuKeyValue.value=Math.round((nearest?.value ?? clip.volume ?? 1)*100)
+  audioMenuKeyEasing.value=typeof nearest?.easing==='string' ? nearest.easing : 'linear'
+  positionMenu(e,{kind:'audio',title:'音频片段 · '+clip.name,audio:clip})
+}
 function applyAudioMenu(){
   const clip=menu.value?.audio
   if(!clip)return
-  emit('audio-edit',clip.id,{volume:Math.max(0,Math.min(1,Number(audioMenuVolume.value)/100)),fadeIn:Math.max(0,Number(audioMenuFadeIn.value)||0),fadeOut:Math.max(0,Number(audioMenuFadeOut.value)||0)})
+  emit('audio-edit',clip.id,{volume:Math.max(0,Math.min(1,Number(audioMenuVolume.value)/100)),fadeIn:Math.max(0,Number(audioMenuFadeIn.value)||0),fadeOut:Math.max(0,Number(audioMenuFadeOut.value)||0),filter:normalizeAudioFilter(audioMenuFilter.value)})
+  closeMenu()
+}
+function currentAudioMenuClip(){return menu.value?.kind==='audio' ? menu.value.audio : null}
+/** 在播放头处写入音量关键帧：同一素材时间已有则覆盖，复用所选缓动。 */
+function applyVolumeKeyframe(){
+  const clip=currentAudioMenuClip()
+  if(!clip || !playheadCoversClip(clip) || props.disabled)return
+  emit('audio-edit',clip.id,{volumeKeyframes:setVolumeKeyframe(clip.volumeKeyframes,sourceAtTimeline(clip,props.time),Number(audioMenuKeyValue.value)/100,audioMenuKeyEasing.value)})
+  closeMenu()
+}
+function removePlayheadVolumeKeyframe(){
+  const clip=currentAudioMenuClip()
+  if(!clip || !playheadCoversClip(clip) || props.disabled)return
+  emit('audio-edit',clip.id,{volumeKeyframes:removeVolumeKeyframe(clip.volumeKeyframes,sourceAtTimeline(clip,props.time))})
+  closeMenu()
+}
+function clearVolumeKeyframes(){
+  const clip=currentAudioMenuClip()
+  if(!clip || props.disabled)return
+  emit('audio-edit',clip.id,{volumeKeyframes:[]})
   closeMenu()
 }
 function clickAudioLane(e){audioSelection.value='';beginSeek(e)}
@@ -518,6 +574,33 @@ function scrubAudio(e,clip){
   selectedClips.value=[];selectedKeys.value=[];selectedEventId.value='';backgroundSelection.value='';audioSelection.value=clip.id
   beginSeek(e)
 }
+/** 拖动音量关键帧菱形：横向改素材内时间（吸附节拍）、纵向改音量（片段高度＝100%）。 */
+let volumeKeyDrag=null
+function beginVolumeKey(e,clip,key){
+  if(props.disabled || e.button!==0 || e.ctrlKey || e.metaKey || e.shiftKey)return
+  closeMenu()
+  selectedClips.value=[];selectedKeys.value=[];selectedEventId.value='';backgroundSelection.value='';audioSelection.value=clip.id
+  emit('begin-edit')
+  dragging.value=true
+  const lane=e.currentTarget.closest('.track-lane'),box=e.currentTarget.closest('.model-clip')
+  // 记下起手时的关键帧表并摘掉这一颗，拖动期间始终从它出发：既不会累积，也不会复制出一颗。
+  volumeKeyDrag={clip,list:removeVolumeKeyframe(normalizeVolumeKeyframes(clip.volumeKeyframes),key.source),origin:{source:key.source,value:key.value,easing:key.easing},x:e.clientX,y:e.clientY,width:Math.max(1,lane.clientWidth),height:Math.max(1,box.clientHeight),scrollLeft:scrollArea.value.scrollLeft}
+  timelineRoot.value.setPointerCapture(e.pointerId)
+  e.preventDefault()
+}
+function moveVolumeKey(e){
+  if(!volumeKeyDrag)return
+  const d=volumeKeyDrag,deltaTime=(e.clientX-d.x+scrollArea.value.scrollLeft-d.scrollLeft)/d.width*props.duration
+  const low=d.clip.offset || 0,high=low+d.clip.duration,clamp=value=>Math.max(low,Math.min(high,value))
+  let source=clamp(d.origin.source+deltaTime)
+  const hit=beatSnap.value && !e.altKey ? snapToBeats(timelineAtSource(d.clip,source),beatTargets.value,8/d.width*props.duration) : {snapped:null}
+  if(hit.snapped!=null)source=clamp(sourceAtTimeline(d.clip,hit.snapped))
+  source=Math.round(source*props.fps)/props.fps
+  const value=Math.max(0,Math.min(1,d.origin.value+(d.y-e.clientY)/d.height))
+  snapTime.value=hit.snapped ?? null
+  emit('audio-edit',d.clip.id,{volumeKeyframes:setVolumeKeyframe(d.list,source,value,d.origin.easing)})
+}
+function endVolumeKey(){if(volumeKeyDrag)emit('end-edit');volumeKeyDrag=null;dragging.value=false;snapTime.value=null}
 function deleteAudioSelection(){if(props.disabled || !audioSelection.value)return false;emit('delete-audio',audioSelection.value);audioSelection.value='';return true}
 function copyAudioClip(){
   const clip=props.audioClips.find(c=>c.id===audioSelection.value)
@@ -629,4 +712,6 @@ function applyBackgroundColor(e){backgroundMenuColor.value=e.target.value;if(men
 .background-clip.hidden,.audio-clip.muted { opacity:.45; }
 .audio-scrub { position:absolute; left:4px; right:4px; top:17px; bottom:3px; z-index:2; cursor:crosshair; }
 .audio-scrub:hover { background:#ffffff40; }
+.audio-volume-key { position:absolute; z-index:3; width:10px; height:10px; margin:0 0 -5px -5px; background:var(--editor-key); border:1px solid #ffffffdd; transform:rotate(45deg); cursor:ns-resize; }
+.audio-volume-key:hover,.audio-volume-key:focus-visible { background:var(--editor-accent); }
 </style>

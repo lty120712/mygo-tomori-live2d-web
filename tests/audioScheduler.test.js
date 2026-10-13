@@ -7,7 +7,7 @@ const asset = { id: 'song', name: '主题曲.mp3', kind: 'audio', duration: 12 }
 
 // 假 Web Audio：记录创建的音源、增益自动化与连接关系。
 function fakeContext() {
-  const created = { sources: [], gains: [], connects: [] }
+  const created = { sources: [], gains: [], filters: [], connects: [] }
   const ctx = {
     currentTime: 10, state: 'running', destination: { name: 'speakers' },
     resumeCalls: 0, closeCalls: 0,
@@ -24,6 +24,11 @@ function fakeContext() {
       return node
     },
     createMediaStreamDestination() { return { stream: { getAudioTracks: () => [{ kind: 'audio', id: 'mix' }] } } },
+    createBiquadFilter() {
+      const node = { type: 'lowpass', frequency: { value: 0 }, Q: { value: 0 }, connect(target) { created.connects.push({ from: node, to: target }) } }
+      created.filters.push(node)
+      return node
+    },
   }
   return { ctx, created }
 }
@@ -175,6 +180,33 @@ test('上下文被浏览器挂起时播放前先恢复', async () => {
   ctx.state = 'running'
   await scheduler.play(0)
   assert.equal(ctx.resumeCalls, 1)
+})
+
+test('滤镜片段走 source → gain → filter → master，无滤镜时保持直连', async () => {
+  const filtered = { ...createAudioClip(asset, 0, 5, 0), filter: 'bandpass' }
+  const plain = createAudioClip(asset, 4, 5, 1)
+  const { created, scheduler } = setup([filtered, plain])
+  await scheduler.play(0)
+  assert.equal(created.filters.length, 1)
+  assert.deepEqual({ type: created.filters[0].type, frequency: created.filters[0].frequency.value, q: created.filters[0].Q.value }, { type: 'bandpass', frequency: 1600, q: .9 })
+  const [gainA, gainB] = [created.gains[1], created.gains[2]]
+  assert.equal(created.connects.filter(c => c.from === gainA && c.to === created.filters[0]).length, 1)
+  assert.equal(created.connects.filter(c => c.from === created.filters[0] && c.to === created.gains[0]).length, 1)
+  // 无滤镜的片段仍然直接接主增益，不额外插节点
+  assert.equal(created.connects.filter(c => c.from === gainB && c.to === created.gains[0]).length, 1)
+  assert.equal(created.connects.filter(c => c.to === created.filters[0]).length, 1)
+})
+
+test('音量关键帧排成自动化折线：保持段用 setValueAtTime，斜坡用 linearRampToValueAtTime', async () => {
+  const clip = { ...createAudioClip(asset, 0, 10, 0), volumeKeyframes: [{ time: 2, value: .2 }, { time: 6, value: 1 }] }
+  const { created, scheduler } = setup([clip])
+  await scheduler.play(0)
+  const round = calls => calls.map(([kind, value, time]) => [kind, Math.round(value * 1e6) / 1e6, Math.round(time * 1e6) / 1e6])
+  assert.deepEqual(round(created.gains[1].gain.calls), [['set', .2, 10.03], ['set', .2, 12.03], ['ramp', 1, 16.03]])
+  // 中途起播时只排剩下的折点，并把起播那一刻的包络值作为起点
+  scheduler.pause()
+  await scheduler.play(4)
+  assert.deepEqual(round(created.gains[2].gain.calls), [['set', .6, 10.03], ['ramp', 1, 12.03]])
 })
 
 test('素材缺失或解码失败会记入 problems，供界面提示', async () => {

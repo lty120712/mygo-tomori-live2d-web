@@ -1,10 +1,11 @@
-import { planAudioPlayback } from './mediaTracks.js'
+import { audioFilterSpec, planAudioPlayback } from './mediaTracks.js'
 import { assetStore } from './assetStore.js'
 
 /**
  * 音频调度：把「播放头 → 要启动的音频源」这段纯计划落到 Web Audio 上。
  *
  * - 每个片段一个 AudioBufferSourceNode，解码结果按 assetId 缓存；
+ * - 片段链路是 source → gain → 可选滤镜 → master，音量自动化点由播放计划给出；
  * - 所有音源都排在同一个起始时刻，因此多条叠放不会互相错开；
  * - 播放、跳帧、循环回绕都重新计算计划，不依赖累计时间，不会漂移；
  * - masterGain 同时接扬声器与 MediaStreamDestination，后者供录制混音。
@@ -100,16 +101,25 @@ export function createAudioScheduler(options = {}) {
       const source = context.createBufferSource()
       source.buffer = audioBuffer
       const gain = context.createGain()
-      gain.gain.setValueAtTime(entry.gain, when)
-      if (entry.fadeIn > 0 && entry.volume > entry.gain) gain.gain.linearRampToValueAtTime(entry.volume, when + entry.fadeIn)
-      const endsAt = when + entry.duration
-      if (entry.fadeOut > 0) {
-        const fadeStart = endsAt - entry.fadeOut
-        if (fadeStart > when) gain.gain.setValueAtTime(entry.volume, fadeStart)
-        gain.gain.linearRampToValueAtTime(0, endsAt)
+      // 落点相同则保持，落点不同才拉斜坡，因此纯粹的淡入淡出仍是原来的两条自动化。
+      let last = entry.gain
+      gain.gain.setValueAtTime(last, when)
+      for (const cue of entry.cues || []) {
+        const at = when + Math.max(0, cue.delay)
+        if (cue.value === last) gain.gain.setValueAtTime(cue.value, at)
+        else gain.gain.linearRampToValueAtTime(cue.value, at)
+        last = cue.value
       }
       source.connect(gain)
-      gain.connect(master)
+      const filter = audioFilterSpec(entry.filter)
+      if (filter.type !== 'none') {
+        const node = context.createBiquadFilter()
+        node.type = filter.type
+        node.frequency.value = filter.frequency
+        node.Q.value = filter.q
+        gain.connect(node)
+        node.connect(master)
+      } else gain.connect(master)
       source.start(when, entry.offset, entry.duration)
       sources.push(source)
     })

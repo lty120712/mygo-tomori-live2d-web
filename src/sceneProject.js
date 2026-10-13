@@ -2,6 +2,8 @@ import { normalizeMotionEvents } from './timelineEvents.js'
 import { applyKeyEasing,normalizeEasing } from './keyframeEasing.js'
 import { normalizeParamValues } from './params.js'
 import { AUDIO_CLIP_LIMIT, AUDIO_TRACK_LIMIT, BACKGROUND_CLIP_LIMIT, createAudioClip, createColorBackgroundClip, createImageBackgroundClip, createImageClip, visualClips } from './mediaTracks.js'
+import { normalizeVolumeKeyframes } from './audioVolume.js'
+import { normalizeAudioFilter } from './audioFilters.js'
 
 export const SCENE_VERSION = 4
 export const SCENE_WIDTH = 960
@@ -196,6 +198,8 @@ export function readProject(data, models) {
       clip.volume = number(raw.volume, 1, 0, 1)
       clip.fadeIn = number(raw.fadeIn, 0, 0, clip.duration)
       clip.fadeOut = number(raw.fadeOut, 0, 0, clip.duration)
+      clip.filter = normalizeAudioFilter(raw.filter)
+      clip.volumeKeyframes = normalizeVolumeKeyframes(raw.volumeKeyframes)
       return clip
     })
   }

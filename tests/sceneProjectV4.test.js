@@ -79,8 +79,10 @@ test('未知版本仍拒绝', () => {
 test('v4 音频片段往返保留素材引用、轨道、时间、音量与淡入淡出', () => {
   const clip = createAudioClip({ id: 'song', name: '主题曲.mp3' }, 1, 4, 2)
   clip.offset = .5; clip.volume = .6; clip.fadeIn = .4; clip.fadeOut = .3
+  clip.filter = 'bandpass'
+  clip.volumeKeyframes = [{ time: 1.5, value: .3, easing: 'easeOut' }, { time: .5, value: .9, easing: 'linear' }]
   const parsed = readProject({ ...createProject(), audioClips: [clip] }, [])
-  assert.deepEqual({ ...parsed.audioClips[0], id: clip.id }, clip)
+  assert.deepEqual({ ...parsed.audioClips[0], id: clip.id }, { ...clip, volumeKeyframes: [{ time: .5, value: .9, easing: 'linear' }, { time: 1.5, value: .3, easing: 'easeOut' }] })
 })
 
 test('v4 校验音频片段：列表、素材引用、上限与数值范围', () => {
@@ -99,12 +101,27 @@ test('v4 校验音频片段：列表、素材引用、上限与数值范围', ()
   assert.equal(clip.offset, 0)
   assert.equal(clip.volume, 1)
   assert.equal(clip.fadeIn, 3)
+  assert.equal(clip.filter, 'none')
+  assert.deepEqual(clip.volumeKeyframes, [])
   assert.equal(clip.fadeOut, 0)
 })
 
 test('v3 旧工程没有音频片段', () => {
   const parsed = readProject({ version: 3, aspectRatio: '16:9', fps: 30, duration: 10, clips: [] }, [])
   assert.deepEqual(parsed.audioClips, [])
+})
+
+test('v4 音频滤镜与音量关键帧：未知滤镜回退、关键帧过滤越界与非法值', () => {
+  const parsed = readProject({
+    ...createProject(), duration: 10,
+    audioClips: [{
+      assetId: 'song', start: 0, duration: 6, filter: 'echo',
+      volumeKeyframes: [{ time: 4, value: 2 }, { time: '-1', value: .5 }, { time: 1, value: -.4 }, { time: 1, value: .7, easing: 'custom' }, 'x'],
+    }],
+  }, [])
+  const clip = parsed.audioClips[0]
+  assert.equal(clip.filter, 'none')
+  assert.deepEqual(clip.volumeKeyframes, [{ time: 1, value: .7, easing: 'linear' }, { time: 4, value: 1, easing: 'linear' }])
 })
 
 test('v4 读写轨道开关：视觉独见、背景隐藏与独见、音频轨道静音与独奏', () => {

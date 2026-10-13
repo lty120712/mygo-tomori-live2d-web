@@ -1,4 +1,9 @@
 import { uid, clipVisible, splitClip } from './sceneProject.js'
+import { audioGainAt, normalizeVolumeKeyframes, splitVolumeKeyframes, volumeAutomationPoints } from './audioVolume.js'
+import { normalizeAudioFilter } from './audioFilters.js'
+
+export { audioGainAt, normalizeVolumeKeyframes } from './audioVolume.js'
+export { AUDIO_FILTER_PRESETS, audioFilterLabel, audioFilterSpec, normalizeAudioFilter } from './audioFilters.js'
 
 export const isImageClip = clip => !!clip?.assetId && !clip.model
 export const visualClips = project => [...project.clips, ...(project.imageClips || [])]
@@ -140,7 +145,7 @@ export function audioClipLimit(clips) {
 export function createAudioClip(asset, start = 0, duration = 5, track = 0) {
   return {
     id: uid('audio'), assetId: asset.id, name: asset.name || '音频', track: Math.max(0, Math.min(AUDIO_TRACK_LIMIT - 1, Math.round(track) || 0)),
-    start, duration, offset: 0, volume: 1, fadeIn: 0, fadeOut: 0,
+    start, duration, offset: 0, volume: 1, fadeIn: 0, fadeOut: 0, filter: 'none', volumeKeyframes: [],
   }
 }
 /**
@@ -165,19 +170,35 @@ export function audibleAudioClips(clips, trackState = {}) {
   const soloed = new Set(Object.entries(trackState || {}).filter(([, state]) => state?.solo).map(([track]) => Number(track)))
   return (clips || []).filter(c => !trackState?.[c.track]?.muted && (!soloed.size || soloed.has(c.track)))
 }
-/** 音量曲线：淡入淡出按秒线性过渡，其余时间等于 volume，两者重叠时取较小值。 */
-export function audioGainAt(clip, time) {
-  const volume = Math.max(0, Math.min(1, clip.volume ?? 1))
-  const local = time - clip.start
-  const fadeIn = Math.max(0, clip.fadeIn || 0), fadeOut = Math.max(0, clip.fadeOut || 0)
-  let gain = volume
-  if (fadeIn > 0) gain = Math.min(gain, volume * Math.max(0, Math.min(1, local / fadeIn)))
-  if (fadeOut > 0) gain = Math.min(gain, volume * Math.max(0, Math.min(1, (clip.duration - local) / fadeOut)))
-  return Math.max(0, Math.min(1, gain))
+/**
+ * 音量自动化点：关键帧折点（含缓动区间的插值点）与淡入淡出边界，
+ * 按「相对起播时刻的延后秒数」排好序；调用方只负责按顺序 setValueAtTime / linearRampToValueAtTime。
+ * 没有关键帧时只剩原来的淡入淡出行为，没有淡入淡出就是一条 setValueAtTime。
+ */
+function audioGainCues(clip, resumeAt, remaining, gain) {
+  const clampCue = cue => ({ delay: cue.delay, value: Math.max(0, Math.min(1, cue.value)) })
+  const cues = volumeAutomationPoints(clip, resumeAt).map(point => clampCue({ delay: point.time - resumeAt, value: point.value }))
+  const fadeIn = Math.max(0, (clip.fadeIn || 0) - Math.max(0, resumeAt - clip.start))
+  if (fadeIn > 0) {
+    // 淡入窗口长于片段时只能升到片段结尾，按那一刻的真实音量收尾。
+    const edge = Math.min(clip.start + (clip.fadeIn || 0), clip.start + clip.duration)
+    const value = audioGainAt(clip, edge)
+    if (value > gain + 1e-9) cues.push(clampCue({ delay: edge - resumeAt, value }))
+  }
+  const fadeOut = Math.max(0, clip.fadeOut || 0)
+  if (fadeOut > 0) {
+    const start = clip.start + clip.duration - fadeOut
+    if (start > resumeAt + 1e-6) cues.push(clampCue({ delay: start - resumeAt, value: audioGainAt(clip, start) }))
+    cues.push(clampCue({ delay: remaining, value: 0 }))
+  }
+  return cues
+    .filter(cue => cue.delay > 1e-6 && cue.delay <= remaining + 1e-6)
+    .sort((a, b) => a.delay - b.delay)
+    .filter((cue, index, all) => !index || Math.abs(cue.delay - all[index - 1].delay) > 1e-6 || Math.abs(cue.value - all[index - 1].value) > 1e-9)
 }
 /**
  * 播放计划：给定播放头时间，算出这一刻要启动的音频源。
- * 每个条目带素材内起播秒数（源偏移 + 已播放部分）、剩余时长与剩余淡入淡出窗口，
+ * 每个条目带素材内起播秒数（源偏移 + 已播放部分）、剩余时长、剩余淡入淡出窗口、滤镜与音量自动化点，
  * 因此跳帧、循环回绕后重新计算即可，不依赖累计时间，不会漂移。
  */
 export function planAudioPlayback(clips, time, { trackState = {}, includeFuture = false } = {}) {
@@ -188,24 +209,30 @@ export function planAudioPlayback(clips, time, { trackState = {}, includeFuture 
     .map(clip => {
       const elapsed = Math.max(0, time - clip.start)
       const remaining = Math.max(0, clip.duration - elapsed)
+      const resumeAt = Math.max(time, clip.start)
+      const gain = audioGainAt(clip, resumeAt)
       return {
         id: clip.id, assetId: clip.assetId, name: clip.name, track: clip.track,
         offset: Math.max(0, (clip.offset || 0) + elapsed),
         duration: remaining,
         delay: Math.max(0, clip.start - time),
-        gain: audioGainAt(clip, Math.max(time, clip.start)),
+        gain,
         volume: Math.max(0, Math.min(1, clip.volume ?? 1)),
         // 淡入是从片段起点开始的窗口，中途起播时只剩没走完的部分；淡出固定在片段末尾。
         fadeIn: Math.max(0, Math.min((clip.fadeIn || 0) - elapsed, remaining)),
         fadeOut: Math.max(0, Math.min(clip.fadeOut || 0, remaining)),
+        filter: normalizeAudioFilter(clip.filter),
+        cues: audioGainCues(clip, resumeAt, remaining, gain),
       }
     })
 }
-/** 复制音频片段：带走素材、时长、音量与淡入淡出；轨道与起点由粘贴时决定。 */
+/** 复制音频片段：带走素材、时长、音量、淡入淡出、滤镜与音量关键帧；轨道与起点由粘贴时决定。 */
 export function audioClipTemplate(clip) {
   return {
     assetId: clip.assetId, name: clip.name, duration: clip.duration,
     volume: clip.volume ?? 1, fadeIn: clip.fadeIn || 0, fadeOut: clip.fadeOut || 0, offset: clip.offset || 0,
+    filter: normalizeAudioFilter(clip.filter),
+    volumeKeyframes: normalizeVolumeKeyframes(clip.volumeKeyframes).map(key => ({ ...key })),
   }
 }
 export function createAudioClipFromTemplate(template, start = 0, duration = template.duration || 5, track = 0) {
@@ -214,11 +241,14 @@ export function createAudioClipFromTemplate(template, start = 0, duration = temp
   clip.fadeIn = Math.max(0, Math.min(template.fadeIn || 0, duration))
   clip.fadeOut = Math.max(0, Math.min(template.fadeOut || 0, duration))
   clip.offset = Math.max(0, template.offset || 0)
+  clip.filter = normalizeAudioFilter(template.filter)
+  clip.volumeKeyframes = normalizeVolumeKeyframes(template.volumeKeyframes)
   return clip
 }
 /**
  * 在播放头切割音频片段：右半段源偏移随切割点前移；淡入留给前半段、淡出留给后半段，
- * 因此切割不会凭空多出或丢掉淡入淡出。播放头不在片段内部时返回 null。
+ * 音量关键帧按切点对应的素材时间拆分并在两侧补上切点关键帧，
+ * 因此切割不会凭空多出或丢掉淡入淡出与音量包络。播放头不在片段内部时返回 null。
  */
 export function splitAudioClip(clip, time) {
   const right = splitClip(clip, time)
@@ -227,5 +257,9 @@ export function splitAudioClip(clip, time) {
   right.fadeOut = Math.min(right.fadeOut || 0, right.duration)
   clip.fadeIn = Math.min(clip.fadeIn || 0, clip.duration)
   clip.fadeOut = 0
+  const cut = (clip.offset || 0) + (right.start - clip.start)
+  const keys = splitVolumeKeyframes(clip.volumeKeyframes, cut)
+  clip.volumeKeyframes = keys.left
+  right.volumeKeyframes = keys.right
   return right
 }
