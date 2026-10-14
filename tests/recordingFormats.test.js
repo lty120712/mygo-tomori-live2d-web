@@ -9,8 +9,11 @@ test('MP4 优先且音视频编码、容器一致，WebM 可显式选择', () =>
   assert.equal(formats[1].id, 'webm')
   assert.match(formats[1].mimeType, /webm.*opus/)
 })
-test('只显示浏览器支持的容器，无支持格式时不伪装为 MP4', () => {
-  assert.deepEqual(recordingFormats(t => t === 'video/webm').map(f => f.id), ['webm'])
+test('WebM-only 浏览器仍提供真实转码的 MP4，完全不支持录制时禁用', () => {
+  const formats=recordingFormats(t => t === 'video/webm')
+  assert.deepEqual(formats.map(f => f.id), ['mp4','webm'])
+  assert.equal(formats[0].transcode,true)
+  assert.equal(formats[0].mimeType,'video/webm')
   assert.deepEqual(recordingFormats(() => false), [])
   assert.equal(recordingFormats(t => t === 'video/mp4')[0].mimeType, 'video/mp4')
 })

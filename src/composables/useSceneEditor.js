@@ -44,7 +44,8 @@ export function useSceneEditor() {
   const sceneCanvas = ref(null), projectInput = ref(null), backgroundInput = ref(null), backgroundLoading = ref(false), uploadingBackground = ref(false), recorder = useRecorder()
   const preparingAudio = ref(false)
   const transferringProject = ref(false)
-  const locked = computed(()=>playing.value || preparingAudio.value || transferringProject.value || recorder.isRecording.value)
+  const locked = computed(()=>playing.value || preparingAudio.value || transferringProject.value || recorder.isRecording.value || recorder.isExporting.value)
+  watch(recorder.error,value=>{if(value)message.value=value})
   const time = computed(()=>frame.value/project.fps)
   const selected = computed(()=>allClips.value.find(c=>c.id===selectedId.value))
   const editLocked = computed(()=>locked.value || !!selected.value?.layerLocked)
@@ -606,6 +607,7 @@ export function useSceneEditor() {
     frame.value=changeProjectFps(project,frame.value,next)
   }
   async function record() {
+    if(recorder.isExporting.value)return
     if(recorder.isRecording.value){pause();recorder.stop();return}
     if(loading.value || preparingAudio.value || transferringProject.value)return
     if(missingMedia.value)message.value='以下素材缺失，录制将跳过：'+missingMedia.value

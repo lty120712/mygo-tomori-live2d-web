@@ -20,15 +20,22 @@ function supportsCaptureStream() {
     typeof HTMLCanvasElement.prototype.captureStream === 'function'
 }
 
-export function useRecorder() {
+export function useRecorder(options = {}) {
+  const convert = options.convert || ((blob, settings) => import('../mp4Transcoder.js').then(m=>m.transcodeMp4(blob,settings)))
   const formats = recordingFormats()
   const format = ref(formats.find(f => f.id === 'mp4')?.id || formats[0]?.id || '')
   const isRecording = ref(false)
+  const isExporting = ref(false)
+  const progress = ref(0)
+  const error = ref('')
+  let exportController = null
+  let destroyed = false
   const canRecord = ref(
     typeof MediaRecorder !== 'undefined' && supportsCaptureStream() && formats.length > 0
   )
 
   let mediaRecorder = null
+  let videoTracks = []
   let chunks = []
   let animFrameId = null
   let outCvs = null
@@ -122,7 +129,8 @@ export function useRecorder() {
   }
 
   function start(sourceCanvas, audioStream, nextMode = 'canvas', getBackground = null, getViewRect = null, fps = RECORD_FPS) {
-    if (!canRecord.value || isRecording.value || !sourceCanvas) return false
+    if (!canRecord.value || isRecording.value || isExporting.value || !sourceCanvas) return false
+    error.value = ''
 
     mode = nextMode === 'portrait' ? 'portrait' : 'canvas'
     readBackground = typeof getBackground === 'function' ? getBackground : null
@@ -138,6 +146,7 @@ export function useRecorder() {
 
     try {
       const stream = outCvs.captureStream([24, 30, 60].includes(fps) ? fps : RECORD_FPS)
+      videoTracks = stream.getVideoTracks?.() || []
       if (mixedTrack) stream.addTrack(mixedTrack)
 
       const selectedFormat = formats.find(f => f.id === format.value)
@@ -152,10 +161,26 @@ export function useRecorder() {
         console.error('录制失败:', e?.error || e)
         stop()
       }
-      mediaRecorder.onstop = () => {
-        if (chunks.length) downloadBlob(new Blob(chunks, { type: mediaRecorder.mimeType || mimeType }), selectedFormat.id)
+      mediaRecorder.onstop = async () => {
+        const blob = new Blob(chunks, { type: mediaRecorder.mimeType || mimeType })
         chunks = []
         cleanup()
+        isExporting.value = true
+        exportController = new AbortController()
+        progress.value = 0
+        try {
+          if(blob.size){
+            const actualType=blob.type.split(';')[0]
+            const output=selectedFormat.id==='mp4' && actualType!=='video/mp4'
+              ? await convert(blob,{progress:value=>progress.value=value,signal:exportController.signal}) : blob
+            if(!destroyed)downloadBlob(output, selectedFormat.id)
+          }
+        } catch(e) {
+          if(!destroyed)error.value='视频导出失败：'+(e?.message || String(e))
+        } finally {
+          exportController=null
+          isExporting.value=false
+        }
       }
       // 分片写入，长视频不会一直堆在内存里
       mediaRecorder.start(1000)
@@ -184,6 +209,7 @@ export function useRecorder() {
       animFrameId = null
     }
     if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+      isExporting.value = true
       // 下载与清理交给 onstop，确保拿到最后一个分片
       mediaRecorder.stop()
     } else {
@@ -192,6 +218,8 @@ export function useRecorder() {
   }
 
   function cleanup() {
+    for(const track of videoTracks)track.stop()
+    videoTracks=[]
     if (animFrameId) {
       cancelAnimationFrame(animFrameId)
       animFrameId = null
@@ -201,6 +229,8 @@ export function useRecorder() {
   }
 
   function destroy() {
+    destroyed = true
+    exportController?.abort()
     isRecording.value = false
     cleanup()
     if (mediaRecorder) {
@@ -215,6 +245,9 @@ export function useRecorder() {
 
   return {
     isRecording,
+    isExporting,
+    progress,
+    error,
     canRecord,
     formats,
     format,

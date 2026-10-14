@@ -4,8 +4,10 @@ const candidates = {
 }
 
 export function recordingFormats(supports = type => typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(type)) {
-  return Object.entries(candidates).flatMap(([id, types]) => {
-    const mimeType = types.find(supports)
-    return mimeType ? [{ id, label: id.toUpperCase(), mimeType }] : []
-  })
+  const mp4 = candidates.mp4.find(supports)
+  const webm = candidates.webm.find(supports)
+  return [
+    ...(mp4 || webm ? [{ id:'mp4',label:'MP4',mimeType:mp4 || webm,transcode:!mp4 }] : []),
+    ...(webm ? [{ id:'webm',label:'WebM',mimeType:webm,transcode:false }] : []),
+  ]
 }

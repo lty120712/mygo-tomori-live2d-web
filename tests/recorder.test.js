@@ -36,6 +36,31 @@ test('实际录制选择 MP4/WebM，下载 Blob 类型与扩展名匹配且保�
       assert.equal(r.isRecording.value,false)
     }
     r.destroy()
+    Recorder.isTypeSupported=type=>type==='video/webm'
+    let finishConversion
+    const fallback=useRecorder({convert:async input=>{
+      assert.match(input.type,/webm/)
+      return new Promise(resolve=>finishConversion=resolve)
+    }})
+    assert.equal(fallback.format.value,'mp4')
+    fallback.start(new Canvas(),{getAudioTracks:()=>[audioTrack]})
+    filename=null;fallback.stop()
+    assert.equal(fallback.isExporting.value,true)
+    assert.equal(filename,null)
+    assert.equal(fallback.start(new Canvas()),false)
+    finishConversion(new Blob(['mp4'],{type:'video/mp4'}))
+    await new Promise(resolve=>setImmediate(resolve))
+    assert.ok(filename.endsWith('.mp4'))
+    assert.equal(blob.type,'video/mp4')
+    assert.equal(fallback.isExporting.value,false)
+    fallback.destroy()
+    const failed=useRecorder({convert:async()=>{throw new Error('转码失败')}})
+    failed.start(new Canvas());filename=null;failed.stop()
+    await new Promise(resolve=>setImmediate(resolve))
+    assert.equal(filename,null)
+    assert.match(failed.error.value,/转码失败/)
+    assert.equal(failed.isExporting.value,false)
+    failed.destroy()
   } finally {
     for(const [key,value] of originals) {if(value===undefined) delete globalThis[key];else globalThis[key]=value}
   }
