@@ -1,7 +1,7 @@
 import { normalizeMotionEvents } from './timelineEvents.js'
 import { applyKeyEasing,normalizeEasing } from './keyframeEasing.js'
 import { normalizeParamValues } from './params.js'
-import { AUDIO_CLIP_LIMIT, AUDIO_TRACK_LIMIT, BACKGROUND_CLIP_LIMIT, createAudioClip, createColorBackgroundClip, createImageBackgroundClip, createImageClip, visualClips } from './mediaTracks.js'
+import { AUDIO_CLIP_LIMIT, AUDIO_TRACK_LIMIT, BACKGROUND_CLIP_LIMIT, VIDEO_CLIP_LIMIT, createAudioClip, createColorBackgroundClip, createImageBackgroundClip, createImageClip, visualClips } from './mediaTracks.js'
 import { normalizeVolumeKeyframes } from './audioVolume.js'
 import { normalizeAudioFilter } from './audioFilters.js'
 
@@ -136,10 +136,12 @@ export function readProject(data, models) {
   })
   if (data.version === 4 && data.imageClips != null) {
     if (!Array.isArray(data.imageClips)) throw new Error('图片片段列表无效')
-    if (data.imageClips.length > 64) throw new Error('单个工程最多 64 个图片片段')
+    if (data.imageClips.length > 96) throw new Error('单个工程的图片与视频片段过多')
     project.imageClips = data.imageClips.map((raw, index) => {
       if (!raw || typeof raw.assetId !== 'string' || !raw.assetId.trim()) throw new Error('图片片段缺少素材引用')
-      const clip = createImageClip({ id: raw.assetId, name: typeof raw.name === 'string' ? raw.name : '图片', width: number(raw.width, 320, 1, 65536), height: number(raw.height, 180, 1, 65536) })
+      const video = raw.media === 'video'
+      const clip = createImageClip({ id: raw.assetId, name: typeof raw.name === 'string' ? raw.name : (video ? '视频' : '图片'), width: number(raw.width, 320, 1, 65536), height: number(raw.height, 180, 1, 65536) })
+      if (video) clip.media = 'video'
       clip.track = Math.round(number(raw.track, project.clips.length + index, 0, 79))
       clip.start = number(raw.start, 0, 0, project.duration - 1 / project.fps)
       clip.duration = number(raw.duration, project.duration - clip.start, 1 / project.fps, project.duration - clip.start)
@@ -159,6 +161,8 @@ export function readProject(data, models) {
       }
       return clip
     })
+    if (project.imageClips.filter(c => c.media === 'video').length > VIDEO_CLIP_LIMIT) throw new Error('单个工程最多 32 个视频片段')
+    if (project.imageClips.filter(c => c.media !== 'video').length > 64) throw new Error('单个工程最多 64 个图片片段')
   }
   if (data.version === 4 && data.audioTrackState != null) {
     if (typeof data.audioTrackState !== 'object' || Array.isArray(data.audioTrackState)) throw new Error('音频轨道状态无效')

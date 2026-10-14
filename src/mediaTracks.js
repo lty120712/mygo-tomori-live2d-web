@@ -5,36 +5,47 @@ import { normalizeAudioFilter } from './audioFilters.js'
 export { audioGainAt, normalizeVolumeKeyframes } from './audioVolume.js'
 export { AUDIO_FILTER_PRESETS, audioFilterLabel, audioFilterSpec, normalizeAudioFilter } from './audioFilters.js'
 
-export const isImageClip = clip => !!clip?.assetId && !clip.model
+export const VIDEO_CLIP_LIMIT = 32
+/** 素材片段（图片或视频）：画面来自素材而不是 Live2D 模型，两者共用同一套结构（transform / 关键帧 / 裁剪 / 切割）。 */
+export const isMediaClip = clip => !!clip?.assetId && !clip.model
+/** 视频与图片片段都用 media 标记画面来源；缺少标记的旧工程片段按图片处理。 */
+export const isVideoClip = clip => isMediaClip(clip) && clip.media === 'video'
+export const isImageClip = clip => isMediaClip(clip) && clip.media !== 'video'
 export const visualClips = project => [...project.clips, ...(project.imageClips || [])]
 export const imageClipVisible = clipVisible
 export function visualClipLimit(clips) {
-  if (clips.filter(c => !isImageClip(c)).length > 16) return '单个工程最多 16 个模型片段'
+  if (clips.filter(c => !isMediaClip(c)).length > 16) return '单个工程最多 16 个模型片段'
+  if (clips.filter(isVideoClip).length > VIDEO_CLIP_LIMIT) return '单个工程最多 32 个视频片段'
   if (clips.filter(isImageClip).length > 64) return '单个工程最多 64 个图片片段'
   return ''
 }
 export function appendVisualClips(project, clips) {
-  project.clips.push(...clips.filter(c => !isImageClip(c)))
-  project.imageClips.push(...clips.filter(isImageClip))
+  project.clips.push(...clips.filter(c => !!c.model))
+  project.imageClips.push(...clips.filter(isMediaClip))
 }
 export function createImageClip(asset, start = 0, duration = 5, track = 0) {
   return {
     id: uid('image'), assetId: asset.id, name: asset.name, track, start, duration, offset: 0,
     width: asset.width, height: asset.height,
     transform: { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1 },
-    keyframes: {}, params: {}, events: [],
+    keyframes: {}, params: {}, events: [], media: 'image',
     layerName: asset.name, layerLocked: false, layerHidden: false, layerSolo: false,
   }
 }
+/** 视频片段：时长默认取素材长度，画面由 <video> 元素按素材内时间取帧。 */
+export function createVideoClip(asset, start = 0, duration = 5, track = 0) {
+  return { ...createImageClip({ ...asset, name: asset.name || '视频' }, start, duration, track), id: uid('video'), media: 'video' }
+}
 // A scale of 100% fits the original aspect ratio inside the 960×540 reference canvas.
 // Store source dimensions on the clip so geometry survives missing local assets.
-export function imageDimensions(clip) {
+export function mediaDimensions(clip) {
   const width = clip.width > 0 ? clip.width : 320, height = clip.height > 0 ? clip.height : 180
   const ratio = Math.min(1, 960 / width, 540 / height)
   return { width: width * ratio, height: height * ratio }
 }
+export const imageDimensions = mediaDimensions
 export function visualPose(clip, transform) {
-  return isImageClip(clip) ? { ...transform, ...imageDimensions(clip) } : transform
+  return isMediaClip(clip) ? { ...transform, ...mediaDimensions(clip) } : transform
 }
 
 export const BACKGROUND_CLIP_LIMIT = 64
@@ -149,16 +160,17 @@ export function createAudioClip(asset, start = 0, duration = 5, track = 0) {
   }
 }
 /**
- * 添加音频片段时决定片段长度与工程时长：素材比工程剩余时长长时把工程补足到片段结尾
+ * 添加音频或视频片段时决定片段长度与工程时长：素材比工程剩余时长长时把工程补足到片段结尾
  * （上限 600 秒），避免长音频一进来就被截成工程剩余时长。
  */
-export function audioClipPlacement(assetDuration, start, projectDuration, fps = 30, limit = 600) {
+export function mediaClipPlacement(assetDuration, start, projectDuration, fps = 30, limit = 600) {
   const frame = 1 / fps, round = value => Math.round(value * fps) / fps
   const wanted = Math.max(frame, Number(assetDuration) || 0)
   const end = start + wanted
   const projectEnd = Math.min(limit, Math.max(projectDuration, end))
   return { duration: Math.max(frame, round(Math.min(end, projectEnd) - start)), projectDuration: projectEnd, truncated: end > projectEnd + 1e-9 }
 }
+export const audioClipPlacement = mediaClipPlacement
 export function audioClipsAtTime(clips, time) {
   return (clips || []).filter(c => time >= c.start - 1e-9 && time < c.start + c.duration - 1e-9)
 }

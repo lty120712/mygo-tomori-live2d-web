@@ -7,6 +7,7 @@
         <button :aria-current="activeTab==='model' ? 'page' : undefined" @click="switchTab('model')">模型<span>{{ models.length }}</span></button>
         <button :aria-current="activeTab==='image' ? 'page' : undefined" @click="switchTab('image')">图片<span>{{ assets.filter(a=>a.kind==='image').length }}</span></button>
         <button :aria-current="activeTab==='audio' ? 'page' : undefined" @click="switchTab('audio')">音频<span>{{ assets.filter(a=>a.kind==='audio').length }}</span></button>
+        <button :aria-current="activeTab==='video' ? 'page' : undefined" @click="switchTab('video')">视频<span>{{ assets.filter(a=>a.kind==='video').length }}</span></button>
       </nav>
 
       <template v-if="activeTab==='model'">
@@ -28,26 +29,27 @@
 
       <template v-else>
         <div class="media-toolbar">
-          <button class="import-btn" :disabled="disabled || importing" @click="pickFile">{{ importing ? '正在导入…' : '批量导入'+(activeTab==='image' ? '图片' : '音频') }}</button>
-          <input ref="fileInput" type="file" multiple hidden :accept="activeTab==='image' ? 'image/*' : 'audio/*'" @change="onFilePicked" />
+          <button class="import-btn" :disabled="disabled || importing" @click="pickFile">{{ importing ? '正在导入…' : '批量导入'+(activeTab==='image' ? '图片' : activeTab==='video' ? '视频' : '音频') }}</button>
+          <input ref="fileInput" type="file" multiple hidden :accept="activeTab==='image' ? 'image/*' : activeTab==='video' ? 'video/*' : 'audio/*'" @change="onFilePicked" />
           <span class="media-hint">保存在本浏览器，可跨工程复用</span>
         </div>
         <div class="library-results">
           <div v-for="a in currentAssets" :key="a.id" class="media-card">
-            <img v-if="a.kind==='image'" :src="a.thumb || ''" alt="" class="media-thumb" />
+            <img v-if="a.kind==='image' || a.kind==='video'" :src="a.thumb || ''" alt="" class="media-thumb" />
             <span v-else class="media-thumb media-audio" aria-hidden="true">♪</span>
-            <span class="model-copy"><strong>{{ a.name }}</strong><small>{{ formatSize(a.size) }}<template v-if="a.kind==='audio' && a.duration"> · {{ a.duration.toFixed(1) }}s</template></small></span>
+            <span class="model-copy"><strong>{{ a.name }}</strong><small>{{ formatSize(a.size) }}<template v-if="a.duration"> · {{ a.duration.toFixed(1) }}s</template></small></span>
             <button v-if="a.kind==='image'" :disabled="disabled" :aria-label="'添加图片 '+a.name" title="添加图片片段到播放头" @click="emit('add-image',a)">＋</button>
             <button v-if="a.kind==='image'" :disabled="disabled" :aria-label="'把 '+a.name+' 设为背景'" title="添加背景片段到播放头" @click="emit('background-image',a)">背景</button>
             <button v-if="a.kind==='audio'" :disabled="disabled" :aria-label="'把 '+a.name+' 加到音频轨道'" title="添加音频片段到播放头" @click="emit('add-audio',a)">轨道</button>
+            <button v-if="a.kind==='video'" :disabled="disabled" :aria-label="'把 '+a.name+' 加到时间线'" title="添加视频片段到播放头" @click="emit('add-video',a)">轨道</button>
             <button class="media-delete" :disabled="disabled || referenced(a)" :aria-label="'删除素材 '+a.name" :title="referenced(a) ? '请先移除工程中引用该素材的片段' : '删除素材'" @click="removeAsset(a)">×</button>
           </div>
-          <div v-if="!currentAssets.length" class="library-empty"><span>还没有{{ activeTab==='image' ? '图片' : '音频' }}素材</span><button @click="pickFile">导入一个</button></div>
+          <div v-if="!currentAssets.length" class="library-empty"><span>还没有{{ activeTab==='image' ? '图片' : activeTab==='video' ? '视频' : '音频' }}素材</span><button @click="pickFile">导入一个</button></div>
         </div>
-        <footer><span class="hint-dot"></span>可拖入多个图片或音频文件</footer>
+        <footer><span class="hint-dot"></span>可拖入多个图片、音频或视频文件</footer>
       </template>
     </div>
-    <div v-if="dragging" class="drop-overlay">松开导入图片／音频</div>
+    <div v-if="dragging" class="drop-overlay">松开导入图片／音频／视频</div>
     <p v-if="importMessage && open" class="import-status" role="status">{{ importMessage }}</p>
   </aside>
 </template>
@@ -57,7 +59,7 @@ import ModelPortrait from './ModelPortrait.vue'
 import { describeModel, filterModelLibrary } from '../modelLibrary.js'
 import { assetStore } from '../assetStore.js'
 const props = defineProps({ models: { type: Array, default: () => [] }, clips: { type: Array, default: () => [] }, audioClips: { type: Array, default: () => [] }, backgroundClips: { type: Array, default: () => [] }, open: Boolean, disabled: Boolean })
-const emit = defineEmits(['toggle', 'add', 'add-image', 'background-image', 'add-audio'])
+const emit = defineEmits(['toggle', 'add', 'add-image', 'background-image', 'add-audio', 'add-video'])
 const referenced = asset => [...props.clips, ...props.backgroundClips, ...props.audioClips].some(c => c.assetId === asset.id)
 const activeTab = ref('model')
 const assets = ref([])

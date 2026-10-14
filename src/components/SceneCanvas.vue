@@ -15,14 +15,15 @@
       <div v-if="!clips.length" class="empty-scene">从左侧素材库添加模型或图片到场景</div>
     </div>
     </div>
-    <ClipRenderer v-for="clip in clips.filter(c=>!isImageClip(c))" :key="clip.id" :clip="clip" @ready="ready" @error="(id, message) => emit('error', id, message)" @dispose="dispose" />
+    <ClipRenderer v-for="clip in clips.filter(c=>!isMediaClip(c))" :key="clip.id" :clip="clip" @ready="ready" @error="(id, message) => emit('error', id, message)" @dispose="dispose" />
   </div>
 </template>
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import ClipRenderer from './ClipRenderer.vue'
-import { backgroundAtTime, isImageClip, paintBackground as paintSceneBackground, visualLayerFilter, visualPose, imageDimensions } from '../mediaTracks.js'
+import { backgroundAtTime, isImageClip, isMediaClip, isVideoClip, paintBackground as paintSceneBackground, mediaDimensions, visualLayerFilter, visualPose } from '../mediaTracks.js'
 import { createImageSources } from '../imageSources.js'
+import { createVideoSources } from '../videoSources.js'
 import { assetStore } from '../assetStore.js'
 import {sceneDrawOrder,sceneHitOrder} from '../sceneLayers.js'
 import { clipVisible, sampleClip, sceneSize } from '../sceneProject.js'
@@ -33,11 +34,21 @@ import {isPanButton,panOffset} from '../canvasPan.js'
 const props = defineProps({ clips: Array, backgroundClips: { type: Array, default: () => [] }, time: Number, fps: Number, aspectRatio:String, selected: Object, selectedIds:Array, runtimes: Object, playing: Boolean, background: String, backgroundImage: String, recording: Boolean })
 const emit = defineEmits(['ready', 'dispose', 'error', 'select', 'move', 'transform', 'batch-transform', 'begin-edit', 'end-edit', 'background-ready', 'mouse-position', 'image-status'])
 const backgroundAssets=computed(()=>props.backgroundClips.filter(c=>c.kind==='image' && c.assetId).map(c=>c.assetId))
-const images=createImageSources({blob:id=>assetStore.blob(id),changed:()=>{
-  const clips=props.clips.filter(isImageClip)
-  emit('image-status',{loading:clips.some(c=>images.status(c.assetId)==='loading') || backgroundAssets.value.some(id=>images.status(id)==='loading'),missing:clips.filter(c=>images.status(c.assetId)==='missing'),backgrounds:props.backgroundClips.filter(c=>c.kind==='image' && images.status(c.assetId)==='missing')})
-}})
-watch(()=>[...props.clips.filter(isImageClip).map(c=>c.assetId),...backgroundAssets.value],ids=>images.sync(ids),{immediate:true,flush:'sync'})
+const imageAssets=computed(()=>props.clips.filter(isImageClip).map(c=>c.assetId))
+const videoAssets=computed(()=>props.clips.filter(isVideoClip).map(c=>c.assetId))
+function emitMediaStatus(){
+  const videosInScene=props.clips.filter(isVideoClip)
+  emit('image-status',{
+    loading:imageAssets.value.some(id=>images.status(id)==='loading') || videosInScene.some(c=>videos.status(c.assetId)==='loading') || backgroundAssets.value.some(id=>images.status(id)==='loading'),
+    missing:props.clips.filter(c=>isImageClip(c) && images.status(c.assetId)==='missing'),
+    videos:videosInScene.filter(c=>videos.status(c.assetId)==='missing'),
+    backgrounds:props.backgroundClips.filter(c=>c.kind==='image' && images.status(c.assetId)==='missing'),
+  })
+}
+const images=createImageSources({blob:id=>assetStore.blob(id),changed:emitMediaStatus})
+const videos=createVideoSources({url:id=>assetStore.url(id),changed:emitMediaStatus})
+watch(()=>[...imageAssets.value,...backgroundAssets.value],ids=>images.sync(ids),{immediate:true,flush:'sync'})
+watch(videoAssets,ids=>videos.sync(ids),{immediate:true,flush:'sync'})
 const size=computed(()=>sceneSize(props.aspectRatio))
 // 隐藏与独见统一在这里判断：模型、图片、背景共用一套规则。
 const layerFilter=computed(()=>visualLayerFilter(props.clips,props.backgroundClips))
@@ -210,12 +221,27 @@ function paint() {
     const filter=layerFilter.value
     const background=backgroundAtTime(filter.backgroundVisible() ? props.backgroundClips : [],{color:props.background,image:props.backgroundImage},props.time)
     paintSceneBackground(ctx,background,{width:size.value.width,height:size.value.height,bitmap:background.kind==='image' ? images.get(background.assetId) : null,legacyImage:backgroundImage,fallback:props.background})
+    const activeVideos=new Set()
     for (const clip of sceneDrawOrder(props.clips)) {
       if (!clipVisible(clip, props.time) || !filter.clipVisible(clip)) continue
+      if(isVideoClip(clip)) {
+        // 播放与录制让视频按原生速度走，暂停与拖动播放头则 seek 到对应的一帧。
+        const playing=props.playing || props.recording
+        const source=videos.align(clip.assetId,(clip.offset || 0)+(props.time-clip.start),{playing})
+        activeVideos.add(clip.assetId)
+        if(source && videos.drawable(clip.assetId)) {
+          const t=pose(clip),dimensions=mediaDimensions(clip)
+          ctx.save();ctx.translate(size.value.width/2+t.x,size.value.height/2+t.y)
+          ctx.rotate(t.rotation*Math.PI/180);ctx.scale(t.scale,t.scale)
+          ctx.globalAlpha=Math.max(0,Math.min(1,t.opacity))
+          ctx.drawImage(source,-dimensions.width/2,-dimensions.height/2,dimensions.width,dimensions.height);ctx.restore()
+        }
+        continue
+      }
       if(isImageClip(clip)) {
         const source=images.get(clip.assetId)
         if(source){
-          const t=pose(clip),dimensions=imageDimensions(clip)
+          const t=pose(clip),dimensions=mediaDimensions(clip)
           ctx.save();ctx.translate(size.value.width/2+t.x,size.value.height/2+t.y)
           ctx.rotate(t.rotation*Math.PI/180);ctx.scale(t.scale,t.scale)
           ctx.globalAlpha=Math.max(0,Math.min(1,t.opacity))
@@ -254,6 +280,7 @@ function paint() {
       ctx.drawImage(source, -480, -270, 960, 540)
       ctx.restore()
     }
+    videos.pauseExcept(activeVideos)
     for (const id of pausedFrames.keys()) if (!props.clips.some(c=>c.id===id)) pausedFrames.delete(id)
   }
 }
@@ -286,7 +313,7 @@ onMounted(() => {
   resizeObserver.observe(preview.value)
   raf = requestAnimationFrame(draw)
 })
-onBeforeUnmount(() => {images.destroy();endPan();window.removeEventListener('blur',cancelPan);pointerUp({type:'pointercancel'});endNudge();window.removeEventListener('keyup',nudgeUp);window.removeEventListener('blur',endNudge);document.removeEventListener('pointermove',trackMouse);document.removeEventListener('pointerout',clearMouse);imageRequest++;backgroundImage=null;cancelAnimationFrame(raf);resizeObserver?.disconnect()})
+onBeforeUnmount(() => {images.destroy();videos.destroy();endPan();window.removeEventListener('blur',cancelPan);pointerUp({type:'pointercancel'});endNudge();window.removeEventListener('keyup',nudgeUp);window.removeEventListener('blur',endNudge);document.removeEventListener('pointermove',trackMouse);document.removeEventListener('pointerout',clearMouse);imageRequest++;backgroundImage=null;cancelAnimationFrame(raf);resizeObserver?.disconnect()})
 </script>
 <style scoped>
 .scene-preview { flex:1; min-height:220px; display:flex; flex-direction:column; background:var(--editor-bg); overflow:hidden; position:relative; }

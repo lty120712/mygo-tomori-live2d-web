@@ -3,17 +3,26 @@ import { ASSET_STORE, openLocalDb, withStore } from './localStore.js'
 import { decodeWaveform } from './audioWaveform.js'
 import { detectBeats } from './audioBeats.js'
 
-export const ASSET_LIMITS = { image: 64 * 1024 * 1024, audio: 512 * 1024 * 1024 }
+export const ASSET_LIMITS = { image: 64 * 1024 * 1024, audio: 512 * 1024 * 1024, video: 512 * 1024 * 1024 }
+const LIMIT_MESSAGES = { image: '图片不能超过 64MB', audio: '音频不能超过 512MB', video: '视频不能超过 512MB' }
 
 const IMAGE_MIME = /^image\/(png|jpe?g|webp|gif|avif)$/
 const AUDIO_MIME = /^audio\/(mpeg|mp4|wav|x-wav|ogg|aac|flac|webm)$/
+const VIDEO_MIME = /^video\/(mp4|webm|quicktime|x-matroska|x-m4v|ogg)$/
 const IMAGE_EXT = /\.(png|jpe?g|webp|gif|avif)$/
 const AUDIO_EXT = /\.(mp3|m4a|wav|ogg|aac|flac|weba|opus)$/
+const VIDEO_EXT = /\.(mp4|m4v|webm|mov|ogv|mkv)$/
 
+/** 先看 MIME 再看扩展名：`audio/mp4` 的 m4a 不会被 `.mp4` 抢成视频。 */
 export function kindOfFile(file) {
+  const type = file.type || ''
   const name = (file.name || '').toLowerCase()
-  if (IMAGE_MIME.test(file.type) || IMAGE_EXT.test(name)) return 'image'
-  if (AUDIO_MIME.test(file.type) || AUDIO_EXT.test(name)) return 'audio'
+  if (AUDIO_MIME.test(type)) return 'audio'
+  if (VIDEO_MIME.test(type)) return 'video'
+  if (IMAGE_MIME.test(type)) return 'image'
+  if (VIDEO_EXT.test(name)) return 'video'
+  if (IMAGE_EXT.test(name)) return 'image'
+  if (AUDIO_EXT.test(name)) return 'audio'
   return null
 }
 
@@ -81,12 +90,75 @@ function probeAudio(file) {
   })
 }
 
+/**
+ * MediaRecorder 录出来的 WebM 不写时长，元数据里 duration 是 Infinity。
+ * 定位到远超末尾的时间会逼浏览器扫完整段并回填真实时长；扫不出来就按 0（未知）处理。
+ */
+export function resolveWebmDuration(video, timeout = 3000) {
+  return new Promise(resolve => {
+    const readable = () => (Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0)
+    const finish = value => {
+      clearTimeout(timer)
+      video.removeEventListener?.('durationchange', check)
+      video.removeEventListener?.('seeked', check)
+      video.removeEventListener?.('timeupdate', check)
+      resolve(value)
+    }
+    const check = () => { const duration = readable(); if (duration) finish(duration) }
+    const timer = setTimeout(() => finish(readable()), timeout)
+    video.addEventListener?.('durationchange', check)
+    video.addEventListener?.('seeked', check)
+    video.addEventListener?.('timeupdate', check)
+    try { video.currentTime = 1e7 } catch { finish(0) }
+  })
+}
+
+// DOM 探测：视频宽高、时长与首帧缩略图（缩略图同时用于素材卡片与时间线片段预览）
+function probeVideo(file) {
+  return new Promise(resolve => {
+    const v = document.createElement('video')
+    const u = URL.createObjectURL(file)
+    let settled = false
+    const done = extra => {
+      if (settled) return
+      settled = true
+      URL.revokeObjectURL(u)
+      resolve({ width: 0, height: 0, duration: 0, thumb: '', ...extra })
+    }
+    // 首帧缩略图在跳转之前取，避免拿到的其实是末尾画面。
+    const firstFrame = () => {
+      try {
+        const w = v.videoWidth, h = v.videoHeight
+        if (!w || !h) return {}
+        const scale = Math.min(1, 160 / Math.max(w, h))
+        const c = document.createElement('canvas')
+        c.width = Math.max(1, Math.round(w * scale))
+        c.height = Math.max(1, Math.round(h * scale))
+        c.getContext('2d').drawImage(v, 0, 0, c.width, c.height)
+        return { width: w, height: h, thumb: c.toDataURL('image/webp', .7) }
+      } catch { return { width: v.videoWidth || 0, height: v.videoHeight || 0, thumb: '' } }
+    }
+    v.preload = 'metadata'
+    v.muted = true
+    v.playsInline = true
+    v.onloadeddata = async () => {
+      const info = firstFrame()
+      const known = Number.isFinite(v.duration) && v.duration > 0 ? v.duration : 0
+      done({ ...info, duration: known || await resolveWebmDuration(v) })
+    }
+    v.onerror = () => done()
+    v.src = u
+  })
+}
+
 export function createAssetStore(backend, options = {}) {
   const probeImageFn = options.probeImage || probeImage
   const probeAudioFn = options.probeAudio || probeAudio
+  const probeVideoFn = options.probeVideo || probeVideo
   const urls = new Map()
   const waveforms = new Map()
   const beats = new Map()
+  const metas = new Map()
   let ready = false
 
   async function init() {
@@ -107,10 +179,10 @@ export function createAssetStore(backend, options = {}) {
     await init()
     const kind = kindOfFile(file)
     if (!kind) throw new Error('不支持的素材类型')
-    if (!sizeOk(file, kind)) throw new Error(kind === 'image' ? '图片不能超过 64MB' : '音频不能超过 512MB')
+    if (!sizeOk(file, kind)) throw new Error(LIMIT_MESSAGES[kind] || '素材体积超出上限')
     const id = uid('asset')
     const meta = { id, kind, name: file.name || '未命名', mimeType: file.type || '', size: file.size, createdAt: Date.now() }
-    Object.assign(meta, kind === 'image' ? await probeImageFn(file) : await probeAudioFn(file))
+    Object.assign(meta, kind === 'image' ? await probeImageFn(file) : kind === 'video' ? await probeVideoFn(file) : await probeAudioFn(file))
     if (kind === 'audio') {
       try { Object.assign(meta, await (options.decodeWaveform || decodeWaveform)(file)) } catch { /* 不支持解码时仍保留素材 */ }
     }
@@ -124,11 +196,22 @@ export function createAssetStore(backend, options = {}) {
     return row ? row.blob : null
   }
 
+  /** 按素材 ID 取元数据（含图片/视频缩略图），带内存缓存供时间线预览复用。 */
+  async function meta(id) {
+    await init()
+    if (metas.has(id)) return metas.get(id)
+    const row = await backend.get(id)
+    const value = row ? row.meta : null
+    if (value) metas.set(id, value)
+    return value
+  }
+
   async function remove(id) {
     await init()
     if (urls.has(id)) { URL.revokeObjectURL(urls.get(id)); urls.delete(id) }
     waveforms.delete(id)
     beats.delete(id)
+    metas.delete(id)
     await backend.delete(id)
   }
 
@@ -153,6 +236,7 @@ export function createAssetStore(backend, options = {}) {
         if (!(await backend.get(id))) return null
         const meta = { ...row.meta, ...result }
         await backend.put(id, meta, row.blob)
+        metas.set(id, meta)
         return meta
       } catch { return null }
     })())
@@ -179,7 +263,7 @@ export function createAssetStore(backend, options = {}) {
     })())
     return beats.get(id)
   }
-  return { init, list, importFile, importFiles, blob, remove, url, waveform, beats: beatsOf }
+  return { init, list, meta, importFile, importFiles, blob, remove, url, waveform, beats: beatsOf }
 }
 
 // 浏览器默认单例

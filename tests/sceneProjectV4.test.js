@@ -1,10 +1,12 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createProject, readProject, SCENE_VERSION } from '../src/sceneProject.js'
-import { createColorBackgroundClip, createImageBackgroundClip } from '../src/mediaTracks.js'
+import { createColorBackgroundClip, createImageBackgroundClip, createImageClip, createVideoClip } from '../src/mediaTracks.js'
 import { createAudioClip } from '../src/mediaTracks.js'
 
 const models = [{ category: 'tomori', name: 'chika', entry: 'model.json' }]
+const picture = index => createImageClip({ id: 'pic-' + index, name: '图片', width: 800, height: 200 })
+const movie = index => createVideoClip({ id: 'vid-' + index, name: '视频.mp4', width: 1280, height: 720 }, 0, 3)
 
 test('v4 工程包含图片/背景/音频数组', () => {
   const p = createProject()
@@ -140,4 +142,34 @@ test('v4 读写轨道开关：视觉独见、背景隐藏与独见、音频轨�
   // 轨道号超出范围的状态被丢弃
   assert.deepEqual(parsed.audioTrackState, { 1: { muted: true, solo: true }, 3: { muted: false, solo: false } })
   assert.throws(() => readProject({ ...createProject(), audioTrackState: [] }, []), /音频轨道状态无效/)
+})
+
+test('v4 视频片段与图片共用 imageClips：往返保留 media 标记与尺寸', () => {
+  const project = { ...createProject(), imageClips: [picture(1), movie(1)] }
+  const parsed = readProject(JSON.parse(JSON.stringify(project)), [])
+  assert.equal(parsed.imageClips.length, 2)
+  assert.equal(parsed.imageClips[0].media, 'image')
+  assert.equal(parsed.imageClips[1].media, 'video')
+  assert.equal(parsed.imageClips[1].name, '视频.mp4')
+  assert.equal(parsed.imageClips[1].width, 1280)
+  assert.equal(parsed.imageClips[1].duration, 3)
+})
+
+test('v4 视频片段缺少名称时补默认名，缺 media 标记按图片解析', () => {
+  const parsed = readProject({ ...createProject(), imageClips: [{ assetId: 'v', media: 'video', width: 2, height: 2 }, { assetId: 'i', width: 2, height: 2 }] }, [])
+  assert.equal(parsed.imageClips[0].media, 'video')
+  assert.equal(parsed.imageClips[0].name, '视频')
+  assert.equal(parsed.imageClips[1].media, 'image')
+  assert.equal(parsed.imageClips[1].name, '图片')
+})
+
+test('v4 图片与视频分开限流：图片 64、视频 32、合计 96', () => {
+  const images = Array.from({ length: 64 }, (_, i) => picture(i))
+  assert.equal(readProject({ ...createProject(), imageClips: [...images, movie(1)] }, []).imageClips.length, 65)
+  assert.throws(() => readProject({ ...createProject(), imageClips: [...images, picture(64)] }, []), /64 个图片片段/)
+  assert.throws(() => readProject({
+    ...createProject(),
+    imageClips: Array.from({ length: 40 }, (_, i) => ({ assetId: 'x' + i, media: 'video', width: 2, height: 2 })),
+  }, []), /32 个视频片段/)
+  assert.throws(() => readProject({ ...createProject(), imageClips: Array.from({ length: 97 }, () => movie(1)) }, []), /图片与视频片段过多/)
 })
