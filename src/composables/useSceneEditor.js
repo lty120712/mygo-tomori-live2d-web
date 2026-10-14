@@ -1,5 +1,6 @@
 import { visualClips, visualLayerFilter, createImageClip, createVideoClip, isVideoClip, appendVisualClips, visualClipLimit, backgroundAtTime, backgroundClipLimit, createClipFromTemplate, createColorBackgroundClip, createImageBackgroundClip, planBackgroundAdd, migrateLegacyBackground, mediaClipPlacement, VIDEO_CLIP_LIMIT, AUDIO_TRACK_LIMIT, audioClipLimit, audioClipPlacement, audioClipTemplate, createAudioClip, createAudioClipFromTemplate, splitAudioClip } from '../mediaTracks.js'
 import { createAudioScheduler } from '../audioScheduler.js'
+import { sceneAudioClips } from '../sceneAudio.js'
 import { normalizeVolumeKeyframes } from '../audioVolume.js'
 import { normalizeAudioFilter } from '../audioFilters.js'
 import { assetStore } from '../assetStore.js'
@@ -213,7 +214,7 @@ export function useSceneEditor() {
   }
   /**
    * 视频片段默认取素材本身的长度；素材比工程剩余时长长时把工程补足到片段结尾（同音频的规则）。
-   * 画面按素材内时间取帧，声音暂不参与混音（后续再接音频调度）。
+   * 画面与可解码的原声按素材内时间同步，原声进入统一混音。
    */
   function addVideo(asset) {
     if(asset.kind!=='video' || !asset.width || !asset.height || !(asset.duration>0)){message.value='视频无法解码，请重新导入有效视频';return}
@@ -299,7 +300,8 @@ export function useSceneEditor() {
     try{ audioAssetIds.value=new Set((await assetStore.list()).filter(asset=>asset.kind==='audio').map(asset=>asset.id)) }
     catch{ audioAssetIds.value=null }
   }
-  watch(()=>[project.audioClips,project.audioTrackState],()=>audio.setClips(project.audioClips,project.audioTrackState),{deep:true,immediate:true})
+  const mixedAudioClips=computed(()=>sceneAudioClips(project))
+  watch(mixedAudioClips,clips=>audio.setClips(clips),{deep:true,immediate:true})
   const audioStart=()=>Math.round(Math.min(time.value,Math.max(0,project.duration-1/project.fps))*project.fps)/project.fps
   const audioTrack=value=>Math.max(0,Math.min(AUDIO_TRACK_LIMIT-1,Number(value)||0))
   function audioTrackFree(track,start,duration,exceptId=''){return !project.audioClips.some(c=>c.id!==exceptId && c.track===track && start<c.start+c.duration-1e-8 && start+duration>c.start+1e-8)}
@@ -418,6 +420,10 @@ export function useSceneEditor() {
     }
     if(merged.track!==clip.track){const target=allClips.value.find(c=>c.id!==id && c.track===merged.track);if(target?.layerLocked){message.value='目标图层已锁定';return}if(target){clip.layerName=target.layerName || target.name;clip.layerLocked=!!target.layerLocked;clip.layerHidden=!!target.layerHidden}}
     Object.assign(clip,{start:merged.start,duration:merged.duration,offset:merged.offset,track:merged.track})
+    if(isVideoClip(clip)){
+      if('videoMuted' in patch)clip.videoMuted=patch.videoMuted===true
+      if('videoVolume' in patch && Number.isFinite(patch.videoVolume))clip.videoVolume=Math.max(0,Math.min(1,patch.videoVolume))
+    }
   }
   const editTiming = (key,value) => editClip(selectedId.value,{[key]:Number(value)})
   function editTransform(key,value) {
@@ -550,7 +556,7 @@ export function useSceneEditor() {
   let raf=null,startTimestamp=0,startFrame=0
   let playbackRequest=0
   async function prepareAudio() {
-    if(!project.audioClips.length)return
+    if(!mixedAudioClips.value.length)return
     preparingAudio.value=true
     try{await audio.prepare()}catch{message.value='音频初始化失败，播放将跳过音频'}finally{preparingAudio.value=false}
   }
@@ -577,11 +583,12 @@ export function useSceneEditor() {
     raf=requestAnimationFrame(tick)
   }
   function startAudio(){
-    if(!project.audioClips.length)return
+    if(!mixedAudioClips.value.length)return
     audio.play(time.value).then(()=>{
       const bad=audio.problems
       if(!bad.length)return
       const names=project.audioClips.filter(c=>bad.includes(c.assetId)).map(c=>c.name)
+      if(!names.length)return
       message.value='以下音频素材缺失或无法解码，播放已跳过：'+[...new Set(names)].join('、')
     }).catch(()=>{message.value='音频播放失败：请点击播放后重试'})
   }

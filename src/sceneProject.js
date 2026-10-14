@@ -141,7 +141,11 @@ export function readProject(data, models) {
       if (!raw || typeof raw.assetId !== 'string' || !raw.assetId.trim()) throw new Error('图片片段缺少素材引用')
       const video = raw.media === 'video'
       const clip = createImageClip({ id: raw.assetId, name: typeof raw.name === 'string' ? raw.name : (video ? '视频' : '图片'), width: number(raw.width, 320, 1, 65536), height: number(raw.height, 180, 1, 65536) })
-      if (video) clip.media = 'video'
+      if (video) {
+        clip.media = 'video'
+        clip.videoMuted = raw.videoMuted === true
+        clip.videoVolume = number(raw.videoVolume, 1, 0, 1)
+      }
       clip.track = Math.round(number(raw.track, project.clips.length + index, 0, 79))
       clip.start = number(raw.start, 0, 0, project.duration - 1 / project.fps)
       clip.duration = number(raw.duration, project.duration - clip.start, 1 / project.fps, project.duration - clip.start)

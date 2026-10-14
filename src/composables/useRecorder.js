@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { DEFAULT_BG_COLOR } from '../background.js'
+import { recordingFormats } from '../recordingFormats.js'
 
 /** 导出视频的帧率 */
 const RECORD_FPS = 30
@@ -20,9 +21,11 @@ function supportsCaptureStream() {
 }
 
 export function useRecorder() {
+  const formats = recordingFormats()
+  const format = ref(formats.find(f => f.id === 'mp4')?.id || formats[0]?.id || '')
   const isRecording = ref(false)
   const canRecord = ref(
-    typeof MediaRecorder !== 'undefined' && supportsCaptureStream()
+    typeof MediaRecorder !== 'undefined' && supportsCaptureStream() && formats.length > 0
   )
 
   let mediaRecorder = null
@@ -108,20 +111,11 @@ export function useRecorder() {
     }
   }
 
-  function pickMimeType() {
-    const candidates = [
-      'video/webm;codecs=vp9',
-      'video/webm;codecs=vp8',
-      'video/webm',
-    ]
-    return candidates.find(type => MediaRecorder.isTypeSupported(type)) || ''
-  }
-
-  function downloadBlob(blob) {
+  function downloadBlob(blob, extension) {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = 'tomori_' + Date.now() + '.webm'
+    a.download = 'tomori_' + Date.now() + '.' + extension
     a.click()
     // 立即释放会让部分浏览器来不及读取，稍微延后
     setTimeout(() => URL.revokeObjectURL(url), 1000)
@@ -146,7 +140,9 @@ export function useRecorder() {
       const stream = outCvs.captureStream([24, 30, 60].includes(fps) ? fps : RECORD_FPS)
       if (mixedTrack) stream.addTrack(mixedTrack)
 
-      const mimeType = pickMimeType()
+      const selectedFormat = formats.find(f => f.id === format.value)
+      if (!selectedFormat) throw new Error('当前浏览器不支持所选视频格式')
+      const mimeType = selectedFormat.mimeType
       chunks = []
       mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
       mediaRecorder.ondataavailable = (e) => {
@@ -157,7 +153,7 @@ export function useRecorder() {
         stop()
       }
       mediaRecorder.onstop = () => {
-        if (chunks.length) downloadBlob(new Blob(chunks, { type: 'video/webm' }))
+        if (chunks.length) downloadBlob(new Blob(chunks, { type: mediaRecorder.mimeType || mimeType }), selectedFormat.id)
         chunks = []
         cleanup()
       }
@@ -220,6 +216,8 @@ export function useRecorder() {
   return {
     isRecording,
     canRecord,
+    formats,
+    format,
     start,
     stop,
     destroy,
