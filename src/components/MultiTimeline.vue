@@ -8,11 +8,13 @@
 <div v-if="audioClips.length" class="timeline-tools beat-tools"><div class="tool-group" role="group" aria-label="音频节拍"><label title="在音频波形上标出节拍点；拖动播放头或片段时吸附到最近的节拍（按住 Alt 临时关闭）"><input type="checkbox" role="switch" aria-label="节拍吸附" v-model="beatSnap" />节拍吸附</label><small>节拍点由音频波形推导，用来把画面和背景对齐到音频</small></div></div>
     <div v-if="selected" class="key-tools"><div class="tool-group" role="group" aria-label="关键帧属性选择"><button :aria-expanded="showKeyRows" @click="showKeyRows=!showKeyRows">{{showKeyRows ? '收起关键帧' : '展开关键帧'}}</button><select aria-label="关键帧属性" v-model="keyProperty"><option v-for="key in keyProperties" :key="key" :value="key">{{labels[key] || key}} · {{(selected.keyframes[key] || []).length}} 帧</option></select></div><div class="tool-group" role="group" aria-label="关键帧编辑"><button aria-label="上一个关键帧" :disabled="disabled || !previousKey" @click="chooseKey(previousKey)">‹</button><button aria-label="添加或删除当前关键帧" :class="{keyed:currentKey}" :disabled="editDisabled || !withinClip" @click="emit('toggle-key',keyProperty)">◆</button><button aria-label="下一个关键帧" :disabled="disabled || !nextKey" @click="chooseKey(nextKey)">›</button><label>{{labels[keyProperty] || keyProperty}}{{ valueDisplay(keyProperty).unit }}<input aria-label="关键帧属性值" type="number" :min="valueDisplay(keyProperty).min" :max="valueDisplay(keyProperty).max" step="1" :value="valueDisplay(keyProperty).toDisplay(propertyValue)" :disabled="editDisabled || !withinClip" @focus="emit('begin-edit')" @blur="$event.target.value=valueDisplay(keyProperty).toDisplay(propertyValue);emit('end-edit')" @input="emit('edit-key-value',keyProperty,valueDisplay(keyProperty).toNative($event.target.value))" /></label><button :disabled="editDisabled || !currentKey" @click="emit('remove-key',keyProperty,currentFrame)">删除关键帧</button><button :disabled="editDisabled || (!selectedKeys.length && !currentKey)" @click="openCurveEditor">速度曲线</button></div><small class="neighbor-description" :title="neighborDescription">{{neighborDescription}}</small></div>
     <div ref="scrollArea" class="timeline-scroll" @wheel="wheelZoom"><div class="timeline-content" :style="{width: (170+laneWidth)+'px'}">
+    <div v-if="textDrop" class="text-drag-notice" role="status">{{textDrop.error || '放到空档合并轨道，放到轨道边缘新建一层；松开确认'}}</div>
     <div class="timeline-ruler"><span>轨道 / 片段</span><div ref="ruler" tabindex="-1" @pointerdown="beginSeek"><i v-for="n in ticks" :key="n" :style="{left: n / duration * 100 + '%'}">{{ formatTimecode(n,fps) }}</i><b v-if="snapTime!==null" class="snap-guide" :style="{left:snapTime/duration*100+'%'}"></b><b :style="{left: time / duration * 100 + '%'}" title="拖动播放头"></b></div></div>
     <div class="track-scroll">
-      <template v-for="track in tracks" :key="track"><div class="track-row">
+      <template v-for="track in tracks" :key="track"><div class="track-row" :class="{'text-insert-before':textDrop?.track===track && textDrop.insert==='before','text-insert-after':textDrop?.track===track && textDrop.insert==='after'}">
         <div class="track-label track-card" tabindex="0" :data-track="track" title="单击展开／收起参数轨道；拖动调整图层顺序；双击名称重命名" :aria-expanded="selected?.track===track && showKeyRows" @pointerdown="beginLayerDrag($event,track)" :aria-label="'选择图层 '+layerName(track)" @contextmenu.prevent.stop="openTrackMenu($event,track)" @click="clickLayer(track)" @keydown.enter.prevent.stop="clickLayer(track)" :class="{active:clips.some(c=>c.track===track && selectedClips.includes(c.id)),'layer-locked':layerLocked(track),'layer-hidden':layerHidden(track),'layer-dragging':layerSource===track,'layer-target':layerTarget===track}"><span class="layer-name" :title="layerName(track)" @dblclick.stop="startLayerRename(track)"><i class="layer-grip" aria-hidden="true">⠿</i><input v-if="editingLayer===track" ref="layerNameInput" aria-label="图层名称" maxlength="100" v-model="layerDraft" @pointerdown.stop @click.stop @dblclick.stop @keydown.enter.prevent.stop="finishLayerRename" @keydown.esc.prevent.stop="editingLayer=null" @blur="finishLayerRename" /><template v-else>{{layerName(track)}}</template><small v-if="selected?.track===track" :title="selected.name">{{ selected.name }}</small></span><button class="layer-toggle" :disabled="disabled" :aria-label="(layerLocked(track) ? '解锁图层 ' : '锁定图层 ')+layerName(track)" :aria-pressed="layerLocked(track)" :title="layerLocked(track) ? '解锁图层' : '锁定图层'" @click.stop="toggleLayer(track,'layerLocked')"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2"/><path :d="layerLocked(track) ? 'M8 10V6a4 4 0 0 1 8 0v4' : 'M8 10V6a4 4 0 0 1 8 0'"/></svg></button><button class="layer-toggle" :disabled="disabled" :aria-label="(layerHidden(track) ? '显示图层 ' : '隐藏图层 ')+layerName(track)" :aria-pressed="layerHidden(track)" :title="layerHidden(track) ? '显示图层' : '隐藏图层'" @click.stop="toggleLayer(track,'layerHidden')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/><path v-if="layerHidden(track)" d="M3 3l18 18"/></svg></button><button class="layer-toggle layer-solo" :disabled="disabled" :aria-label="(layerSolo(track) ? '取消独见 ' : '独见 ')+layerName(track)" :aria-pressed="layerSolo(track)" :title="layerSolo(track) ? '取消独见' : '独见：只显示该轨道'" @click.stop="toggleLayer(track,'layerSolo')">独</button><button v-if="selected?.track===track" :disabled="disabled || layerLocked(track)" :aria-label="'删除片段 '+selected.name" title="删除选中片段（Delete）" @click.stop="selectedClips.length ? deleteClips() : emit('delete-selected')">删除</button></div>
-        <div class="track-lane" tabindex="-1" @pointerdown.self="boxMode ? beginBox($event,'clips') : beginTrackSeek($event,track)" @contextmenu.prevent.stop="openTrackMenu($event,track)">
+        <div class="track-lane" :data-visual-track="track" tabindex="-1" @pointerdown.self="boxMode ? beginBox($event,'clips') : beginTrackSeek($event,track)" @contextmenu.prevent.stop="openTrackMenu($event,track)">
+          <div v-if="textDrop?.track===track" class="text-drop-preview" :class="{invalid:textDrop.error}" :style="{left:textDrop.start/duration*100+'%',width:textDrop.duration/duration*100+'%'}">{{textDrop.error || (textDrop.insert ? '新建文字层' : '放置文字片段')}}</div>
           <div v-for="clip in clips.filter(c => c.track === track)" :key="clip.id" class="model-clip" tabindex="0" :aria-label="'选择片段 '+clip.name" :class="{selected: selectedClips.includes(clip.id),multiselected:selectedClips.includes(clip.id),'image-clip':isMediaClip(clip)}" :data-clip-id="clip.id" @contextmenu.prevent.stop="openClipMenu($event,clip)" :style="{left: clip.start / duration * 100 + '%', width: clip.duration / duration * 100 + '%'}" @click="chooseClip(clip,$event)" @pointerdown="begin($event,clip,'move')" @pointermove="move" @pointerup="end" @pointercancel="end" @lostpointercapture="end">
             <ClipThumb v-if="isVideoClip(clip)" :asset-id="clip.assetId" />
             <span class="trim-handle left" title="裁剪入点" @pointerdown.stop="begin($event,clip,'left')"></span>
@@ -175,6 +177,7 @@ import KeyframeCurveEditor from './KeyframeCurveEditor.vue'
 import {EASING_PRESETS,normalizeEasing,easingLabel} from '../keyframeEasing.js'
 import { AUDIO_TRACK_LIMIT, audioClipTemplate, backgroundClipTemplate, isMediaClip, isVideoClip } from '../mediaTracks.js'
 import { isTextClip } from '../textTracks.js'
+import { planTextTransfer } from '../textClipPlacement.js'
 import {copyClips,planClipMove,planClipSplit} from '../clipSelection.js'
 import { eventRange,eventProgress,planEventEdit } from '../timelineEvents.js'
 import { copyKeyRefs,planKeyPaste } from '../keyframeClipboard.js'
@@ -194,6 +197,7 @@ const props=defineProps({clips:Array,backgroundClips:{type:Array,default:()=>[]}
 const emit=defineEmits(['add-text','selection-change','clear-selection','batch-clips','batch-keys','select','seek','layer-state','background-track-state','audio-track-state','rename-layer','reorder-layer','edit-clip','remove-key','move-key','toggle-key','edit-key-value','edit-event','paste-event','remove-event','begin-edit','end-edit','delete-selected','add-background-color','background-edit','delete-background','split-background','background-image','import-background-image','paste-background','add-audio','import-audio','audio-edit','delete-audio','split-audio','paste-audio'])
 const timelineRoot=ref(null),scrollArea=ref(null),ruler=ref(null),selectedKeys=ref([]),boxMode=ref(true),boxRect=ref(null),menu=ref(null),menuValue=ref(0),menuNativeValue=ref(0),menuTime=ref(0),menuEasing=ref('linear')
 const curveEdit=ref(null)
+const textDrop=ref(null)
 const menuPreset=computed({get:()=>typeof menuEasing.value==='object' ? 'custom' : menuEasing.value,set:value=>{if(value==='custom')openCurveEditor();else menuEasing.value=value}})
 function openCurveEditor(){
   if(props.disabled)return
@@ -393,7 +397,7 @@ function moveSeek(e){
   if(scrubbing?.pointerId===e.pointerId && !props.disabled)seekAt(e.clientX,scrubbing.target.getBoundingClientRect(),e.altKey)
 }
 function endSeek(e){
-  if(drag)end()
+  if(drag)end(e)
   if(backgroundDrag)endBackground()
   if(audioDrag)endAudio()
   if(volumeKeyDrag)endVolumeKey()
@@ -403,13 +407,26 @@ function endSeek(e){
   if(box)endBox()
   if(scrubbing?.pointerId===e.pointerId){scrubbing=null;snapTime.value=null}
 }
-function begin(e,clip,mode){if(props.disabled || clip.layerLocked || e.button!==0 || e.ctrlKey || e.metaKey || e.shiftKey)return;chooseClip(clip);selectedKeys.value=[];selectedEventId.value='';e.currentTarget.closest('.model-clip').focus({preventScroll:true});emit('begin-edit');dragging.value=true;drag={original:props.clips.filter(c=>selectedClips.value.includes(c.id)).map(c=>JSON.parse(JSON.stringify(c))),id:clip.id,mode,x:e.clientX,start:clip.start,duration:clip.duration,offset:clip.offset,width:e.currentTarget.closest('.track-lane').clientWidth,scrollLeft:scrollArea.value.scrollLeft};timelineRoot.value.setPointerCapture(e.pointerId);e.preventDefault()}
+function begin(e,clip,mode){if(props.disabled || clip.layerLocked || e.button!==0 || e.ctrlKey || e.metaKey || e.shiftKey)return;chooseClip(clip);selectedKeys.value=[];selectedEventId.value='';e.currentTarget.closest('.model-clip').focus({preventScroll:true});emit('begin-edit');dragging.value=true;drag={original:props.clips.filter(c=>selectedClips.value.includes(c.id)).map(c=>JSON.parse(JSON.stringify(c))),id:clip.id,mode,x:e.clientX,y:e.clientY,start:clip.start,duration:clip.duration,offset:clip.offset,width:e.currentTarget.closest('.track-lane').clientWidth,scrollLeft:scrollArea.value.scrollLeft};timelineRoot.value.setPointerCapture(e.pointerId);e.preventDefault()}
 function move(e){
   if(!drag)return
   const delta=(e.clientX-drag.x+scrollArea.value.scrollLeft-drag.scrollLeft)/drag.width*props.duration,tolerance=8/drag.width*props.duration
   if(drag.mode==='move'){
     const ids=new Set(drag.original.map(c=>c.id))
     const targets=snapping.value && !e.altKey ? [0,props.duration,props.time,...props.clips.filter(c=>!ids.has(c.id)).flatMap(c=>[c.start,c.start+c.duration]),...beatTargets.value] : []
+    if(drag.original.length===1 && isTextClip(drag.original[0])){
+      if(Math.abs(e.clientX-drag.x)<3 && Math.abs(e.clientY-drag.y)<3 && !textDrop.value)return
+      let track=drag.original[0].track,insert=null
+      if(Math.abs(e.clientY-drag.y)>12){
+        const lane=[...timelineRoot.value.querySelectorAll('[data-visual-track]')].find(el=>{const r=el.getBoundingClientRect();return e.clientY>=r.top-6 && e.clientY<=r.bottom+6})
+        if(!lane){textDrop.value={error:'请拖到视觉轨道或轨道边缘'};snapTime.value=null;return}
+        const rect=lane.getBoundingClientRect();track=Number(lane.dataset.visualTrack)
+        insert=e.clientY<rect.top+6 ? 'before' : e.clientY>rect.bottom-6 ? 'after' : null
+      }
+      textDrop.value={...planTextTransfer(props.clips,drag.id,{start:drag.start+delta,track,insert},{duration:props.duration,fps:props.fps,targets,tolerance}),duration:drag.duration}
+      snapTime.value=textDrop.value.snapTime ?? null
+      return
+    }
     const plan=planClipMove(props.clips,drag.original,delta,{duration:props.duration,fps:props.fps,targets,tolerance})
     snapTime.value=plan.snapTime
     emit('batch-clips',{type:'move',entries:plan.entries})
@@ -420,7 +437,12 @@ function move(e){
   snapTime.value=result.snapTime
   emit('edit-clip',drag.id,result.patch)
 }
-function end(){if(drag)emit('end-edit');drag=null;dragging.value=false;snapTime.value=null}
+function end(e){
+  const current=drag,drop=textDrop.value
+  drag=null;textDrop.value=null;dragging.value=false;snapTime.value=null
+  if(current && drop && !drop.error && e?.type==='pointerup')emit('batch-clips',{type:'transfer-text',ids:[current.id],...drop})
+  if(current)emit('end-edit')
+}
 function updateToolbarSize(){availableWidth.value=scrollArea.value.clientWidth;minimumTimelineHeight.value=Math.max(220,[...timelineRoot.value.querySelectorAll('.timeline-tools,.key-tools')].reduce((sum,el)=>sum+el.getBoundingClientRect().height,104))}
 function observeToolbars(){for(const el of timelineRoot.value?.querySelectorAll('.timeline-tools,.key-tools') || [])observer?.observe(el);updateToolbarSize()}
 watch(()=>props.selectedId,()=>nextTick(observeToolbars))
@@ -652,6 +674,12 @@ function applyBackgroundColor(e){backgroundMenuColor.value=e.target.value;if(men
 
 </script>
 <style scoped>
+.track-row { position:relative; }
+.text-insert-before::before,.text-insert-after::after { content:''; position:absolute; left:170px; right:0; height:3px; background:var(--editor-accent); z-index:12; pointer-events:none; }
+.text-insert-before::before { top:0; }.text-insert-after::after { bottom:0; }
+.text-drop-preview { position:absolute; inset-block:2px; border:2px dashed var(--editor-accent); background:var(--editor-accent-soft); color:var(--editor-text); z-index:10; pointer-events:none; overflow:hidden; font-size:10px; }
+.text-drop-preview.invalid { border-color:#d44; background:#dd444433; }
+.text-drag-notice { position:absolute; bottom:0; right:8px; z-index:20; padding:4px 8px; background:var(--editor-panel,#fff); color:var(--editor-text,#333); border:1px solid var(--editor-border,#ccc); pointer-events:none; font-size:11px; }
 .menu-section { border-top:1px solid var(--editor-border); padding-top:8px; font-size:11px; color:var(--editor-accent); }.timeline-menu button { display:flex; align-items:center; justify-content:space-between; gap:8px; }.timeline-menu kbd,.menu-hint { flex-shrink:0; color:var(--editor-muted); font:inherit; font-size:10px; }.menu-status { color:var(--editor-key)!important; }.menu-footer { border-top:1px solid var(--editor-border); padding-top:8px; }.timeline-menu .menu-delete { color:var(--editor-accent); }
 .model-clip.multiselected { outline:2px solid var(--editor-focus); outline-offset:-2px; background:var(--editor-clip-selected); }
 .menu-edit-fields { display:flex; flex-direction:column; gap:8px; border:0; margin:0; padding:0; min-width:0; }.track-card.layer-hidden .layer-name { opacity:.45; }.layer-toggle { padding:3px!important; flex-shrink:0; font-size:10px!important; }.layer-toggle svg { display:block; width:14px; height:14px; fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }.layer-toggle[aria-pressed=true] { border-color:var(--editor-focus)!important; color:var(--editor-accent)!important; }.track-card.layer-locked { cursor:default!important; }

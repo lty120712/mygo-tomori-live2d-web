@@ -4,6 +4,7 @@ import { sceneAudioClips } from '../sceneAudio.js'
 import { normalizeBlendMode } from '../visualComposite.js'
 import { VISUAL_TRACK_LIMIT, createTextClip, isImageClip } from '../mediaTracks.js'
 import { isTextClip, normalizeText, normalizeTextStyle, TEXT_CLIP_LIMIT } from '../textTracks.js'
+import { textPlacement,applyTextTransfer } from '../textClipPlacement.js'
 import { normalizeVolumeKeyframes } from '../audioVolume.js'
 import { normalizeAudioFilter } from '../audioFilters.js'
 import { assetStore } from '../assetStore.js'
@@ -212,7 +213,9 @@ export function useSceneEditor() {
   function addText(){
     if(project.imageClips.filter(isTextClip).length>=TEXT_CLIP_LIMIT){message.value='单个工程最多 32 个文字片段';return}
     const start=Math.min(time.value,project.duration-1/project.fps)
-    const clip=createTextClip(start,Math.min(5,project.duration-start),insertFrontLayer(allClips.value))
+    const placement=textPlacement(allClips.value,start,Math.min(5,project.duration-start),{fps:project.fps,preferredTrack:selected.value?.track})
+    const clip=createTextClip(start,placement?.duration ?? Math.min(5,project.duration-start),placement?.track ?? insertFrontLayer(allClips.value))
+    if(placement)Object.assign(clip,placement.layer)
     project.imageClips.push(clip);selectCanvas([clip.id],clip.id)
   }
   function editText(patch){
@@ -408,6 +411,11 @@ export function useSceneEditor() {
   }
   function reorderLayer(from,to){reorderSceneLayer(allClips.value,from,to)}
   function batchClips(action){
+    if(action.type==='transfer-text'){
+      const plan=applyTextTransfer(allClips.value,action,{duration:project.duration,fps:project.fps})
+      if(plan.error)message.value=plan.error
+      return
+    }
     if(action.type==='move'){if(!applyClipStarts(allClips.value,action.entries,project.duration,project.fps))message.value='整组移动不能越界或与同轨道片段重叠'}
     else if(action.type==='delete'){const ids=new Set(action.ids);project.clips=project.clips.filter(c=>!ids.has(c.id));project.imageClips=project.imageClips.filter(c=>!ids.has(c.id));canvasSelection.value=canvasSelection.value.filter(id=>!ids.has(id));if(ids.has(selectedId.value))selectedId.value=canvasSelection.value.at(-1) || ''}
     else if(action.type==='split'){
