@@ -40,6 +40,7 @@ import {isPanButton,panOffset} from '../canvasPan.js'
 import { usePreviewFullscreen } from '../composables/usePreviewFullscreen.js'
 import { formatTimecode } from '../timecode.js'
 import { applyVisualComposite } from '../visualComposite.js'
+import { isTextClip, paintText } from '../textTracks.js'
 const fullscreenRoot=ref(null),exitFullscreenButton=ref(null)
 const fullscreen=usePreviewFullscreen(fullscreenRoot)
 const controlsVisible=ref(true)
@@ -248,6 +249,13 @@ function paint() {
     const activeVideos=new Set()
     for (const clip of sceneDrawOrder(props.clips)) {
       if (!clipVisible(clip, props.time) || !filter.clipVisible(clip)) continue
+      if(isTextClip(clip)){
+        const t=pose(clip)
+        ctx.save();ctx.translate(size.value.width/2+t.x,size.value.height/2+t.y)
+        ctx.rotate(t.rotation*Math.PI/180);ctx.scale(t.scale,t.scale)
+        applyVisualComposite(ctx,clip,t.opacity);paintText(ctx,clip);ctx.restore()
+        continue
+      }
       if(isVideoClip(clip)) {
         // 播放与录制让视频按原生速度走，暂停与拖动播放头则 seek 到对应的一帧。
         const playing=props.playing || props.recording

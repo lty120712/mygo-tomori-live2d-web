@@ -1,22 +1,26 @@
 import { uid, clipVisible, splitClip } from './sceneProject.js'
 import { audioGainAt, normalizeVolumeKeyframes, splitVolumeKeyframes, volumeAutomationPoints } from './audioVolume.js'
 import { normalizeAudioFilter } from './audioFilters.js'
+import { isTextClip, TEXT_CLIP_LIMIT, normalizeTextStyle, layoutText } from './textTracks.js'
+export { isTextClip } from './textTracks.js'
 
 export { audioGainAt, normalizeVolumeKeyframes } from './audioVolume.js'
 export { AUDIO_FILTER_PRESETS, audioFilterLabel, audioFilterSpec, normalizeAudioFilter } from './audioFilters.js'
 
 export const VIDEO_CLIP_LIMIT = 32
+export const VISUAL_TRACK_LIMIT = 144
 /** 素材片段（图片或视频）：画面来自素材而不是 Live2D 模型，两者共用同一套结构（transform / 关键帧 / 裁剪 / 切割）。 */
-export const isMediaClip = clip => !!clip?.assetId && !clip.model
+export const isMediaClip = clip => (!!clip?.assetId || isTextClip(clip)) && !clip.model
 /** 视频与图片片段都用 media 标记画面来源；缺少标记的旧工程片段按图片处理。 */
 export const isVideoClip = clip => isMediaClip(clip) && clip.media === 'video'
-export const isImageClip = clip => isMediaClip(clip) && clip.media !== 'video'
+export const isImageClip = clip => isMediaClip(clip) && clip.media !== 'video' && !isTextClip(clip)
 export const visualClips = project => [...project.clips, ...(project.imageClips || [])]
 export const imageClipVisible = clipVisible
 export function visualClipLimit(clips) {
   if (clips.filter(c => !isMediaClip(c)).length > 16) return '单个工程最多 16 个模型片段'
   if (clips.filter(isVideoClip).length > VIDEO_CLIP_LIMIT) return '单个工程最多 32 个视频片段'
   if (clips.filter(isImageClip).length > 64) return '单个工程最多 64 个图片片段'
+  if (clips.filter(isTextClip).length > TEXT_CLIP_LIMIT) return '单个工程最多 32 个文字片段'
   return ''
 }
 export function appendVisualClips(project, clips) {
@@ -36,9 +40,15 @@ export function createImageClip(asset, start = 0, duration = 5, track = 0) {
 export function createVideoClip(asset, start = 0, duration = 5, track = 0) {
   return { ...createImageClip({ ...asset, name: asset.name || '视频' }, start, duration, track), id: uid('video'), media: 'video' }
 }
+export function createTextClip(start=0,duration=5,track=0){
+  const clip=createImageClip({name:'文字'},start,duration,track)
+  delete clip.assetId
+  return {...clip,id:uid('text'),media:'text',text:'请输入文字',textStyle:normalizeTextStyle()}
+}
 // A scale of 100% fits the original aspect ratio inside the 960×540 reference canvas.
 // Store source dimensions on the clip so geometry survives missing local assets.
 export function mediaDimensions(clip) {
+  if(isTextClip(clip)){const {width,height}=layoutText(clip);return {width,height}}
   const width = clip.width > 0 ? clip.width : 320, height = clip.height > 0 ? clip.height : 180
   const ratio = Math.min(1, 960 / width, 540 / height)
   return { width: width * ratio, height: height * ratio }

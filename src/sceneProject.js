@@ -1,10 +1,11 @@
 import { normalizeMotionEvents } from './timelineEvents.js'
 import { applyKeyEasing,normalizeEasing } from './keyframeEasing.js'
 import { normalizeParamValues } from './params.js'
-import { AUDIO_CLIP_LIMIT, AUDIO_TRACK_LIMIT, BACKGROUND_CLIP_LIMIT, VIDEO_CLIP_LIMIT, createAudioClip, createColorBackgroundClip, createImageBackgroundClip, createImageClip, visualClips } from './mediaTracks.js'
+import { VISUAL_TRACK_LIMIT, AUDIO_CLIP_LIMIT, AUDIO_TRACK_LIMIT, BACKGROUND_CLIP_LIMIT, VIDEO_CLIP_LIMIT, createAudioClip, createColorBackgroundClip, createImageBackgroundClip, createImageClip, visualClips } from './mediaTracks.js'
 import { normalizeVolumeKeyframes } from './audioVolume.js'
 import { normalizeAudioFilter } from './audioFilters.js'
 import { normalizeBlendMode } from './visualComposite.js'
+import { isTextClip, normalizeText, normalizeTextStyle } from './textTracks.js'
 
 export const SCENE_VERSION = 4
 export const SCENE_WIDTH = 960
@@ -113,7 +114,7 @@ export function readProject(data, models) {
     clip.layerLocked = raw.layerLocked === true
     clip.layerHidden = raw.layerHidden === true
     clip.layerSolo = raw.layerSolo === true
-    clip.track = Math.round(number(raw.track, index, 0, 79))
+    clip.track = Math.round(number(raw.track, index, 0, VISUAL_TRACK_LIMIT-1))
     clip.start = number(raw.start, 0, 0, project.duration - 1 / project.fps)
     clip.duration = number(raw.duration, project.duration - clip.start, 1 / project.fps, project.duration - clip.start)
     clip.offset = number(raw.offset, 0, 0, 600)
@@ -138,18 +139,21 @@ export function readProject(data, models) {
   })
   if (data.version === 4 && data.imageClips != null) {
     if (!Array.isArray(data.imageClips)) throw new Error('图片片段列表无效')
-    if (data.imageClips.length > 96) throw new Error('单个工程的图片与视频片段过多')
+    if (data.imageClips.length > 128) throw new Error('单个工程的视觉素材片段过多')
+    if (data.imageClips.filter(c=>!isTextClip(c)).length > 96) throw new Error('单个工程的图片与视频片段过多')
     project.imageClips = data.imageClips.map((raw, index) => {
-      if (!raw || typeof raw.assetId !== 'string' || !raw.assetId.trim()) throw new Error('图片片段缺少素材引用')
+      const text=isTextClip(raw)
+      if (!raw || (!text && (typeof raw.assetId !== 'string' || !raw.assetId.trim()))) throw new Error('图片片段缺少素材引用')
       const video = raw.media === 'video'
       const clip = createImageClip({ id: raw.assetId, name: typeof raw.name === 'string' ? raw.name : (video ? '视频' : '图片'), width: number(raw.width, 320, 1, 65536), height: number(raw.height, 180, 1, 65536) })
       clip.blendMode = normalizeBlendMode(raw.blendMode)
+      if(text){delete clip.assetId;clip.media='text';clip.text=normalizeText(raw.text);clip.textStyle=normalizeTextStyle(raw.textStyle)}
       if (video) {
         clip.media = 'video'
         clip.videoMuted = raw.videoMuted === true
         clip.videoVolume = number(raw.videoVolume, 1, 0, 1)
       }
-      clip.track = Math.round(number(raw.track, project.clips.length + index, 0, 79))
+      clip.track = Math.round(number(raw.track, project.clips.length + index, 0, VISUAL_TRACK_LIMIT-1))
       clip.start = number(raw.start, 0, 0, project.duration - 1 / project.fps)
       clip.duration = number(raw.duration, project.duration - clip.start, 1 / project.fps, project.duration - clip.start)
       clip.offset = number(raw.offset, 0, 0, 600)
@@ -169,7 +173,8 @@ export function readProject(data, models) {
       return clip
     })
     if (project.imageClips.filter(c => c.media === 'video').length > VIDEO_CLIP_LIMIT) throw new Error('单个工程最多 32 个视频片段')
-    if (project.imageClips.filter(c => c.media !== 'video').length > 64) throw new Error('单个工程最多 64 个图片片段')
+    if (project.imageClips.filter(c => c.media !== 'video' && !isTextClip(c)).length > 64) throw new Error('单个工程最多 64 个图片片段')
+    if (project.imageClips.filter(isTextClip).length > 32) throw new Error('单个工程最多 32 个文字片段')
   }
   if (data.version === 4 && data.audioTrackState != null) {
     if (typeof data.audioTrackState !== 'object' || Array.isArray(data.audioTrackState)) throw new Error('音频轨道状态无效')
