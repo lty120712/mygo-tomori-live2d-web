@@ -1,14 +1,15 @@
-<template><div ref="host" class="render-source"><canvas :id="'source-' + clip.id" width="960" height="540"></canvas></div></template>
+<template><div ref="host" class="render-source" :style="{width:960*resolution+'px',height:540*resolution+'px'}"><canvas :id="'source-' + clip.id" width="960" height="540"></canvas></div></template>
 <script setup>
-import { ref, onMounted, onBeforeUnmount, markRaw } from 'vue'
+import { ref, onMounted, onBeforeUnmount, markRaw, watch, nextTick } from 'vue'
 import { init } from 'l2d'
 import { buildParamGroups } from '../params.js'
 import { collectMotionInfo } from '../motions.js'
 import { isolateModelDisposal, isolateModelTiming } from '../live2dSceneAdapter.js'
-const props = defineProps({ clip: { type: Object, required: true } })
+const props = defineProps({ clip: { type: Object, required: true }, resolution: { type:Number,default:1 } })
 const emit = defineEmits(['ready', 'error', 'dispose'])
 const host = ref(null)
 let sdk = null, disposed = false, loaded = false
+watch(()=>props.resolution,async()=>{await nextTick();if(loaded && !disposed)sdk?.resize()})
 function disableTracking() {
   const legacy = sdk?._state?.l2d2Model
   if (legacy?._boundMouseEvent) {
@@ -49,5 +50,5 @@ onBeforeUnmount(() => {
 </script>
 <style scoped>
 .render-source { position:absolute; left:-10000px; top:0; width:960px; height:540px; pointer-events:none; }
-.render-source canvas { width:960px!important; height:540px!important; }
+.render-source canvas { width:100%!important; height:100%!important; }
 </style>

@@ -1,13 +1,19 @@
 <template>
-  <div class="scene-preview">
+  <div ref="fullscreenRoot" class="scene-preview" :class="{'preview-fullscreen':fullscreen.active.value}" @keydown.capture="fullscreenKey">
+    <button v-if="fullscreen.active.value" class="fullscreen-toggle" :aria-expanded="controlsVisible" @click="controlsVisible=!controlsVisible">{{controlsVisible ? '隐藏控件' : '显示控件'}}</button>
+    <div v-if="fullscreen.active.value && controlsVisible" class="fullscreen-controls" role="group" aria-label="全屏预览控制">
+      <button :disabled="recording" @click="emit('toggle-play')">{{playing ? '暂停' : '播放'}}</button>
+      <label class="fullscreen-scrubber"><span>{{formatTimecode(time,fps)}} / {{formatTimecode(duration,fps)}}</span><input type="range" aria-label="全屏预览时间条" min="0" :max="duration" :step="1/fps" :value="time" :aria-valuetext="formatTimecode(time,fps)+' / '+formatTimecode(duration,fps)" :disabled="recording" @input="emit('seek',Number($event.target.value))" /></label>
+      <span>Esc 退出全屏</span><button ref="exitFullscreenButton" @click="fullscreen.exit">退出全屏</button>
+    </div>
     <div v-if="selectionEntries.length>1 && !recording" class="selection-tools" role="group" aria-label="图层对齐与分布">
       <span>已选 {{ selectionEntries.length }} 个图层</span>
       <button v-for="tool in layoutTools" :key="tool.key" :disabled="playing || !layoutSelection(selectionEntries,tool.key).length" :title="tool.title" @click="applyLayout(tool.key)">{{ tool.label }}</button>
     </div>
-    <div class="preview-tools" role="group" aria-label="画布缩放"><span>画布</span><small aria-hidden="true">10%</small><input type="range" aria-label="画布缩放比例" min="10" max="200" step="1" :value="displayZoom" :aria-valuetext="displayZoom+'%'" @input="changePreviewZoom($event.target.value)" /><small aria-hidden="true">200%</small><output aria-live="off">{{displayZoom}}%</output><button :aria-pressed="previewFit==='manual' && manualZoom===100" title="按工程尺寸显示：100%" @click="changePreviewZoom(100)">100%</button><button :aria-pressed="previewFit==='width'" title="按预览区宽度显示，超出高度时上下滚动" @click="fitPreview('width')">适应宽度</button><button :aria-pressed="previewFit==='contain'" title="保持比例并完整显示画面" @click="fitPreview('contain')">完整画面</button></div>
+    <div class="preview-tools" role="group" aria-label="画布缩放"><span>画布</span><small aria-hidden="true">10%</small><input type="range" aria-label="画布缩放比例" min="10" max="200" step="1" :value="displayZoom" :aria-valuetext="displayZoom+'%'" @input="changePreviewZoom($event.target.value)" /><small aria-hidden="true">200%</small><output aria-live="off">{{displayZoom}}%</output><button :aria-pressed="previewFit==='manual' && manualZoom===100" title="按工程尺寸显示：100%" @click="changePreviewZoom(100)">100%</button><button :aria-pressed="previewFit==='width'" title="按预览区宽度显示，超出高度时上下滚动" @click="fitPreview('width')">适应宽度</button><button :aria-pressed="previewFit==='contain'" title="保持比例并完整显示画面" @click="fitPreview('contain')">完整画面</button><button aria-label="全屏预览" title="全屏预览画布，Esc 退出" @click="fullscreen.enter">全屏预览</button></div>
     <div class="preview-viewport" ref="preview" :class="{'pan-active':!!panDrag}" title="按住鼠标中键拖动平移视野" @pointerdown.capture="beginPan" @pointermove="movePan" @pointerup="endPan" @pointercancel="endPan" @lostpointercapture="endPan" @auxclick.middle.prevent>
     <div class="scene-stage" ref="stage" tabindex="0" aria-label="画布编辑区域" @keydown="nudgeKey" @focusout="endNudge" :style="{ width: stageWidth + 'px', height:stageWidth*size.height/size.width+'px',transform:'translate('+viewPan.x+'px,'+viewPan.y+'px)' }" @pointermove="pointerMove" @pointerup="pointerUp" @pointercancel="pointerUp" @lostpointercapture="pointerUp">
-      <canvas ref="canvas" :width="size.width" :height="size.height" aria-label="场景合成画布" @pointerdown="pointerDown"></canvas>
+      <canvas ref="canvas" :width="Math.round(size.width*renderScale)" :height="Math.round(size.height*renderScale)" aria-label="场景合成画布" @pointerdown="pointerDown"></canvas>
       <div v-if="selectionEntries.length>1" v-for="entry in selectionEntries" :key="entry.id" class="selection-outline member-outline" :style="poseBox(entry.pose)" aria-hidden="true"></div>
       <div v-if="selectedBox" class="selection-outline" :style="selectedBox" :aria-label="'已选 '+selectionEntries.length+' 个图层'"><span>{{ selectionEntries.length>1 ? '已选 '+selectionEntries.length+' 个图层' : selected?.name }}</span><template v-if="!playing"><button v-for="corner in ['nw','ne','sw','se']" :key="corner" class="transform-handle scale-handle" :class="corner" :aria-label="'缩放图层 '+corner" :title="selectionEntries.length>1 ? '围绕选区中心整体缩放' : '拖动等比缩放，对角固定'" @pointerdown.stop.prevent="beginTransform($event,'scale',corner)"></button><i class="rotation-stem" aria-hidden="true"></i><button class="transform-handle rotate-handle" aria-label="旋转图层" title="拖动旋转；按住 Shift 吸附到 15°" @pointerdown.stop.prevent="beginTransform($event,'rotate')">↻</button></template></div>
       <div v-if="marquee" class="canvas-marquee" :style="marquee" aria-hidden="true"></div>
@@ -15,7 +21,7 @@
       <div v-if="!clips.length" class="empty-scene">从左侧素材库添加模型或图片到场景</div>
     </div>
     </div>
-    <ClipRenderer v-for="clip in clips.filter(c=>!isMediaClip(c))" :key="clip.id" :clip="clip" @ready="ready" @error="(id, message) => emit('error', id, message)" @dispose="dispose" />
+    <ClipRenderer v-for="clip in clips.filter(c=>!isMediaClip(c))" :key="clip.id" :clip="clip" :resolution="modelResolution" @ready="ready" @error="(id, message) => emit('error', id, message)" @dispose="dispose" />
   </div>
 </template>
 <script setup>
@@ -31,8 +37,18 @@ import { beginCanvasTransform,scaleCanvasTransform,rotateCanvasTransform } from 
 import { snapCanvasPosition,nudgeCanvasPosition } from '../canvasPosition.js'
 import {selectionBounds,boxSelected,moveSelection,scaleSelection,rotateSelection,layoutSelection} from '../canvasSelection.js'
 import {isPanButton,panOffset} from '../canvasPan.js'
-const props = defineProps({ clips: Array, backgroundClips: { type: Array, default: () => [] }, time: Number, fps: Number, aspectRatio:String, selected: Object, selectedIds:Array, runtimes: Object, playing: Boolean, background: String, backgroundImage: String, recording: Boolean })
-const emit = defineEmits(['ready', 'dispose', 'error', 'select', 'move', 'transform', 'batch-transform', 'begin-edit', 'end-edit', 'background-ready', 'mouse-position', 'image-status'])
+import { usePreviewFullscreen } from '../composables/usePreviewFullscreen.js'
+import { formatTimecode } from '../timecode.js'
+const fullscreenRoot=ref(null),exitFullscreenButton=ref(null)
+const fullscreen=usePreviewFullscreen(fullscreenRoot)
+const controlsVisible=ref(true)
+function fullscreenKey(event){
+  if(!fullscreen.active.value || event.code!=='Space' || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey)return
+  event.preventDefault();event.stopPropagation()
+  if(!event.repeat && !props.recording)emit('toggle-play')
+}
+const props = defineProps({ clips: Array, backgroundClips: { type: Array, default: () => [] }, time: Number, duration: { type: Number, default: 0 }, fps: Number, aspectRatio:String, selected: Object, selectedIds:Array, runtimes: Object, playing: Boolean, background: String, backgroundImage: String, recording: Boolean })
+const emit = defineEmits(['ready', 'dispose', 'error', 'select', 'move', 'transform', 'batch-transform', 'begin-edit', 'end-edit', 'background-ready', 'mouse-position', 'image-status', 'toggle-play', 'seek'])
 const backgroundAssets=computed(()=>props.backgroundClips.filter(c=>c.kind==='image' && c.assetId).map(c=>c.assetId))
 const imageAssets=computed(()=>props.clips.filter(isImageClip).map(c=>c.assetId))
 const videoAssets=computed(()=>props.clips.filter(isVideoClip).map(c=>c.assetId))
@@ -50,6 +66,8 @@ const videos=createVideoSources({url:id=>assetStore.url(id),changed:emitMediaSta
 watch(()=>[...imageAssets.value,...backgroundAssets.value],ids=>images.sync(ids),{immediate:true,flush:'sync'})
 watch(videoAssets,ids=>videos.sync(ids),{immediate:true,flush:'sync'})
 const size=computed(()=>sceneSize(props.aspectRatio))
+const renderScale=computed(()=>fullscreen.active.value && !props.recording ? Math.max(1,Math.min(4,stageWidth.value/size.value.width*(window.devicePixelRatio || 1))) : 1)
+const modelResolution=computed(()=>fullscreen.active.value && !props.recording ? Math.max(1,renderScale.value/(window.devicePixelRatio || 1)) : 1)
 // 隐藏与独见统一在这里判断：模型、图片、背景共用一套规则。
 const layerFilter=computed(()=>visualLayerFilter(props.clips,props.backgroundClips))
 const previewFit=ref('width')
@@ -57,6 +75,7 @@ const manualZoom=ref(100)
 const panDrag=ref(null),viewPan=ref({x:0,y:0})
 const cancelPan=()=>endPan()
 function beginPan(e){
+  if(fullscreen.active.value)return
   if(props.recording || drag || !isPanButton(e.button))return
   e.preventDefault();e.stopPropagation();endNudge()
   panDrag.value={pointerId:e.pointerId,x:e.clientX,y:e.clientY,origin:{...viewPan.value}}
@@ -137,6 +156,7 @@ function trackMouse(e) {
 }
 function clearMouse(e) {if(!e.relatedTarget)emit('mouse-position',null)}
 function pointerDown(e) {
+  if(fullscreen.active.value)return
   endNudge();stage.value.focus({preventScroll:true})
   if (props.playing || props.recording || e.button !== 0) return
   const p = point(e)
@@ -204,6 +224,7 @@ function pointerUp(event) {
 }
 function endNudge(){if(nudgeKeys.size)emit('end-edit');nudgeKeys.clear()}
 function nudgeKey(e){
+  if(fullscreen.active.value)return
   if(e.defaultPrevented || e.isComposing || e.target!==stage.value || !['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key) || e.ctrlKey || e.metaKey || e.altKey)return
   e.preventDefault();e.stopPropagation()
   if(drag || props.playing || props.recording || !selectionEntries.value.length)return
@@ -217,6 +238,8 @@ watch(()=>selectionEntries.value.map(e=>e.id).join(',')+'|'+props.playing+'|'+pr
 function paint() {
   const ctx = canvas.value?.getContext('2d')
   if (ctx) {
+    ctx.setTransform(canvas.value.width/size.value.width,0,0,canvas.value.height/size.value.height,0,0)
+    ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high'
     ctx.clearRect(0, 0, size.value.width, size.value.height)
     const filter=layerFilter.value
     const background=backgroundAtTime(filter.backgroundVisible() ? props.backgroundClips : [],{color:props.background,image:props.backgroundImage},props.time)
@@ -282,15 +305,23 @@ function paint() {
     }
     videos.pauseExcept(activeVideos)
     for (const id of pausedFrames.keys()) if (!props.clips.some(c=>c.id===id)) pausedFrames.delete(id)
+    if(exportCanvas){
+      if(exportCanvas.width!==size.value.width)exportCanvas.width=size.value.width
+      if(exportCanvas.height!==size.value.height)exportCanvas.height=size.value.height
+      exportCanvas.getContext('2d').drawImage(canvas.value,0,0,exportCanvas.width,exportCanvas.height)
+    }
   }
 }
 function draw(){paint();raf=requestAnimationFrame(draw)}
-defineExpose({ getCanvas: () => {paint();return canvas.value} })
+let exportCanvas=null
+defineExpose({ getCanvas: () => {exportCanvas ||= document.createElement('canvas');paint();return exportCanvas} })
+watch(modelResolution,async()=>{await nextTick();await nextTick();pausedFrames.clear()})
 function resizePreview(){
   if(!preview.value)return
-  const width=Math.max(1,preview.value.clientWidth-24),height=Math.max(1,preview.value.clientHeight-24)
+  const padding=fullscreen.active.value ? 0 : 24
+  const width=Math.max(1,preview.value.clientWidth-padding),height=Math.max(1,preview.value.clientHeight-padding)
   const fitWidth=previewFit.value==='width' ? width : Math.min(width,height*size.value.width/size.value.height)
-  stageWidth.value=previewFit.value==='manual' ? size.value.width*manualZoom.value/100 : Math.max(size.value.width*.1,Math.min(size.value.width*2,fitWidth))
+  stageWidth.value=fullscreen.active.value ? Math.min(width,height*size.value.width/size.value.height) : previewFit.value==='manual' ? size.value.width*manualZoom.value/100 : Math.max(size.value.width*.1,Math.min(size.value.width*2,fitWidth))
 }
 async function fitPreview(mode){viewPan.value={x:0,y:0};previewFit.value=mode;resizePreview();await nextTick();if(preview.value){preview.value.scrollTop=0;preview.value.scrollLeft=0}}
 watch([previewFit,manualZoom,()=>props.aspectRatio],async()=>{
@@ -302,6 +333,23 @@ watch([previewFit,manualZoom,()=>props.aspectRatio],async()=>{
   if(!viewport || !element)return
   viewport.scrollLeft=previewFit.value==='manual' ? element.offsetLeft+viewPan.value.x+Math.max(0,Math.min(1,x))*stageWidth.value-viewport.clientWidth/2 : 0
   viewport.scrollTop=previewFit.value==='manual' ? element.offsetTop+viewPan.value.y+Math.max(0,Math.min(1,y))*stageWidth.value*size.value.height/size.value.width-viewport.clientHeight/2 : 0
+})
+let savedPreview=null
+watch(fullscreen.active,async active=>{
+  if(active){
+    controlsVisible.value=true
+    savedPreview={fit:previewFit.value,zoom:manualZoom.value,pan:{...viewPan.value},left:preview.value?.scrollLeft || 0,top:preview.value?.scrollTop || 0}
+    endPan();endNudge();pointerUp({type:'pointercancel'})
+    previewFit.value='contain';viewPan.value={x:0,y:0}
+    await nextTick();resizePreview();exitFullscreenButton.value?.focus({preventScroll:true})
+  }else if(savedPreview){
+    const saved=savedPreview;savedPreview=null
+    previewFit.value=saved.fit;manualZoom.value=saved.zoom
+    await nextTick();resizePreview();await nextTick()
+    viewPan.value=saved.pan
+    if(preview.value){preview.value.scrollLeft=saved.left;preview.value.scrollTop=saved.top}
+    fullscreenRoot.value?.querySelector('[aria-label="全屏预览"]')?.focus({preventScroll:true})
+  }
 })
 onMounted(() => {
   window.addEventListener('blur',cancelPan)
@@ -317,6 +365,16 @@ onBeforeUnmount(() => {images.destroy();videos.destroy();endPan();window.removeE
 </script>
 <style scoped>
 .scene-preview { flex:1; min-height:220px; display:flex; flex-direction:column; background:var(--editor-bg); overflow:hidden; position:relative; }
+.scene-preview.preview-fullscreen { position:fixed; inset:0; width:100vw; height:100dvh; min-height:0; z-index:10000; background:#000; }
+.preview-fullscreen .preview-tools,.preview-fullscreen .selection-tools,.preview-fullscreen .selection-outline,.preview-fullscreen .canvas-guide { display:none; }
+.preview-fullscreen .preview-viewport { padding:0; overflow:hidden; }
+.fullscreen-controls { position:absolute; z-index:5; bottom:18px; left:50%; transform:translateX(-50%); display:flex; flex-wrap:wrap; width:min(720px,calc(100% - 32px)); box-sizing:border-box; gap:12px; align-items:center; padding:8px 12px; border-radius:10px; background:rgba(20,20,20,.85); color:#fff; }
+.fullscreen-controls button { font:inherit; color:#fff; background:#333; border:1px solid #666; border-radius:6px; padding:7px 12px; cursor:pointer; white-space:nowrap; }
+.fullscreen-controls button:focus-visible { outline:2px solid #fff; outline-offset:2px; }
+.fullscreen-controls span { white-space:nowrap; }
+.fullscreen-toggle { position:absolute; top:16px; right:16px; z-index:6; background:rgba(20,20,20,.85); color:#fff; border:1px solid #666; border-radius:6px; padding:7px 12px; cursor:pointer; }
+.fullscreen-scrubber { display:flex; flex:1 1 200px; min-width:0; flex-direction:column; gap:5px; font-variant-numeric:tabular-nums; }
+.fullscreen-scrubber input { width:100%; margin:0; accent-color:#c4b5fd; cursor:pointer; }
 .selection-tools { display:flex; align-items:center; flex-wrap:wrap; gap:5px; padding:8px 12px; border-bottom:1px solid var(--editor-border); background:var(--editor-panel); font-size:11px; }
 .selection-tools span { color:var(--editor-muted); margin-right:4px; }
 .selection-tools button { font:inherit; padding:5px 7px; border:1px solid var(--editor-border); border-radius:var(--editor-radius); background:var(--editor-soft); color:var(--editor-text); cursor:pointer; }
