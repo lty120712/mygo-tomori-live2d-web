@@ -24,3 +24,12 @@ export function setLayerState(clips,track,patch){
   }
 }
 export function canEditClips(clips,ids){return ids.every(id=>{const clip=clips.find(c=>c.id===id);return !!clip && !clip.layerLocked})}
+
+/** 图层改名同步该轨道的片段名，画布与时间线共用更新后的名称。 */
+export function renameSceneLayer(clips,track,value){
+  const name=String(value ?? '').trim().slice(0,100)
+  const members=clips.filter(clip=>clip.track===track)
+  if(!name || !members.length || members.some(clip=>clip.layerLocked))return false
+  for(const clip of members){clip.layerName=name;clip.name=name}
+  return true
+}

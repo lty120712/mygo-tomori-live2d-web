@@ -14,7 +14,7 @@ import {sceneParameterOverrides} from '../sceneParameterPriority.js'
 import {expressionParameterIds,motionEffectParameterIds} from '../live2dSceneAdapter.js'
 import { resetCanvasPlacement } from '../resetCanvasPlacement.js'
 import { playbackFrame } from '../scenePlayback.js'
-import { reorderSceneLayer,insertFrontLayer,setLayerState,canEditClips } from '../sceneLayers.js'
+import { reorderSceneLayer,insertFrontLayer,setLayerState,canEditClips,renameSceneLayer } from '../sceneLayers.js'
 import { applyClipStarts,planClipPaste,planClipSplit } from '../clipSelection.js'
 import { activeEvent, planEventEdit,linkedExpressionMotion } from '../timelineEvents.js'
 import { ref, reactive, shallowReactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
@@ -99,7 +99,7 @@ export function useSceneEditor() {
     if(fn===batchClips && args[0].type!=='paste')ids=args[0].type==='move' ? args[0].entries.map(e=>e.id) : args[0].ids
     if([renameLayer,reorderLayer].includes(fn))ids=allClips.value.filter(c=>c.track===args[0]).map(c=>c.id)
     if(!canEditClips(allClips.value,ids)){message.value='图层已锁定，请先解锁后编辑';return}
-    if(fn===resetPlacement || fn===changeLayerState || fn===changeBackgroundTrackState || fn===changeAudioTrackState || fn===renameLayer || fn===reorderLayer || (fn===batchClips && args[0].type!=='move') || (fn===batchKeys && args[1].type!=='move'))history.end()
+    if(fn===resetPlacement || fn===changeLayerState || fn===changeBackgroundTrackState || fn===changeAudioTrackState || (fn===renameLayer && args[2]!==true) || fn===reorderLayer || (fn===batchClips && args[0].type!=='move') || (fn===batchKeys && args[1].type!=='move'))history.end()
     clearLivePreview()
     return history.edit(()=>fn(...args),merge ? fn.name+':'+selectedId.value+':'+frame.value+':'+(args[0]?.key ?? args[0]) : undefined)
   }
@@ -377,7 +377,7 @@ export function useSceneEditor() {
   const pasteAudioAction=template=>withAudioEdit(()=>pasteAudioClip(template))
   // 与背景轨道一致：不在这里 history.end()，拖动期间时间线已打开手势，松手才落一条记录。
   function withAudioEdit(mutate){if(locked.value)return;return history.edit(mutate)}
-  function renameLayer(track,value){const name=String(value).trim().slice(0,100);if(!name)return;for(const clip of allClips.value.filter(c=>c.track===track))clip.layerName=name}
+  function renameLayer(track,value){renameSceneLayer(allClips.value,track,value)}
   function changeLayerState(track,patch){setLayerState(allClips.value,track,patch);drive()}
   function changeBackgroundTrackState(patch){
     for(const clip of project.backgroundClips){

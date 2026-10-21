@@ -1,8 +1,29 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {sceneLayers,reorderSceneLayer,insertFrontLayer,sceneDrawOrder,sceneHitOrder,setLayerState,canEditClips} from '../src/sceneLayers.js'
+import {sceneLayers,reorderSceneLayer,insertFrontLayer,sceneDrawOrder,sceneHitOrder,setLayerState,canEditClips,renameSceneLayer} from '../src/sceneLayers.js'
 import {createEditHistory} from '../src/editHistory.js'
 const clips=()=>[{id:'a',track:0,start:0,duration:3,keyframes:{'@x':[{frame:30,value:100}]},events:[{type:'expression',frame:0,name:'smile'}]},{id:'b',track:1,start:1,duration:3},{id:'c',track:2,start:0,duration:1},{id:'d',track:0,start:3,duration:2}]
+
+test('图层改名同步同轨道所有片段名，保留其他轨道与资源引用',()=>{
+  const c=clips();c[0].model='tomori/model';c[3].assetId='image'
+  assert.equal(renameSceneLayer(c,0,'  便装高松灯  '),true)
+  for(const clip of [c[0],c[3]]){assert.equal(clip.layerName,'便装高松灯');assert.equal(clip.name,'便装高松灯')}
+  assert.equal(c[1].name,undefined);assert.equal(c[0].model,'tomori/model');assert.equal(c[3].assetId,'image')
+  assert.equal(c[0].keyframes['@x'][0].value,100)
+  assert.equal(renameSceneLayer(c,0,'   '),false)
+  assert.equal(c[0].name,'便装高松灯')
+  c[3].layerLocked=true
+  assert.equal(renameSceneLayer(c,0,'不应修改'),false);assert.equal(c[0].name,'便装高松灯')
+})
+test('图层名称连续输入合并成一步撤销，同步还原图层名和片段名',()=>{
+  let project={clips:clips().map(c=>({...c,name:'原片段',layerName:'原图层'}))}
+  const history=createEditHistory({capture:()=>({project:structuredClone(project)}),restore:state=>{project=structuredClone(state.project)}})
+  history.begin()
+  for(const name of ['便','便装','便装高松灯'])history.edit(()=>renameSceneLayer(project.clips,0,name))
+  history.end();history.undo()
+  assert.equal(project.clips[0].name,'原片段');assert.equal(project.clips[0].layerName,'原图层');assert.equal(history.canUndo,false)
+  history.redo();assert.equal(project.clips[0].name,'便装高松灯');assert.equal(project.clips[3].layerName,'便装高松灯')
+})
 
 test('锁定与隐藏作用于同层全部片段，混合编辑整批拒绝，隐藏不阻止编辑',()=>{
   const c=clips()
