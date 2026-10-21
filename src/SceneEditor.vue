@@ -20,6 +20,7 @@
         <label class="clip-name-label">图层名称<input aria-label="图层名称" :value="selected.layerName || selected.name" @focus="beginEdit" @blur="endEdit" @change="renameLayer(selected.track,$event.target.value)" /></label><p class="model-identity" :title="selected.model">{{modelIdentity}}</p></fieldset>
         <div class="inspector-tabs" role="tablist" aria-label="片段属性分类"><button v-for="tab in inspectorTabs" :key="tab.key" role="tab" :aria-selected="inspectorTab===tab.key" :tabindex="inspectorTab===tab.key ? 0 : -1" :aria-controls="'inspector-'+tab.key" :id="'inspector-tab-'+tab.key" @keydown="navigateInspectorTabs" @click="inspectorTab=tab.key">{{tab.label}}</button></div><fieldset :disabled="editLocked" class="inspector-fields"><section v-show="inspectorTab==='basic'" id="inspector-basic" role="tabpanel" aria-labelledby="inspector-tab-basic"><label>片段名称<input aria-label="片段名称" :value="selected.name" @focus="beginEdit" @blur="endEdit" @input="renameClip($event.target.value)" /></label><div class="clip-actions"><button :disabled="locked" @click="duplicate">复制</button><button :disabled="locked || !canSplit" @click="split">在播放头切割</button></div>
         <p class="status-label">{{ clipVisible(selected,time) ? '当前显示' : '当前时间不在片段内' }} · {{ selectionStatus }}</p>
+        <label>混合模式<select aria-label="片段混合模式" :value="selected.blendMode || 'source-over'" @change="changeBlendMode($event.target.value)"><option v-for="mode in BLEND_MODES" :key="mode.value" :value="mode.value">{{mode.label}}</option></select></label><p class="preview-hint">与下方图层和背景混合，可配合不透明度关键帧调整强度。</p>
         <div class="property-grid"><label>开始时间<TimecodeInput label="片段开始时间" :value="selected.start" :fps="project.fps" :max="project.duration-1/project.fps" :disabled="locked" @begin-edit="beginEdit" @end-edit="endEdit" @change="editTiming('start',$event)" /></label><label>显示时长<TimecodeInput label="片段显示时长" :value="selected.duration" :fps="project.fps" :min="1/project.fps" :max="project.duration-selected.start" :disabled="locked" @begin-edit="beginEdit" @end-edit="endEdit" @change="editTiming('duration',$event)" /></label><label>轨道 / 层级<input aria-label="片段轨道" type="number" min="1" max="80" :value="selected.track+1" :disabled="locked" @focus="beginEdit" @blur="endEdit" @input="editClip(selected.id,{track:Number($event.target.value)-1})" /></label><label>源时间偏移<input type="text" :value="formatTimecode(selected.offset,project.fps)" disabled /></label></div>
         <div v-if="isVideoClip(selected)" class="property-grid"><label class="check-label"><input type="checkbox" aria-label="视频原声静音" :checked="selected.videoMuted" @change="editClip(selected.id,{videoMuted:$event.target.checked})" />原声静音</label><label>原声音量 %<input type="number" aria-label="视频原声音量" min="0" max="100" :value="Math.round((selected.videoVolume ?? 1)*100)" @focus="beginEdit" @blur="endEdit" @input="editClip(selected.id,{videoVolume:Math.max(0,Math.min(100,Number($event.target.value)))/100})" /></label></div>
         <h4>画面变换</h4><button :disabled="editLocked || !clipVisible(selected,time)" @click="resetPlacement" title="位置归零、缩放恢复 100%；当前或前后关键帧之间记录重置值">重置位置和大小</button><label class="check-label"><input type="checkbox" v-model="autoTransform" :disabled="locked" />自动添加变换关键帧</label>
@@ -38,6 +39,7 @@
 <script setup>
 import { ref,computed,watch } from 'vue'
 import { isImageClip, isMediaClip, isVideoClip } from './mediaTracks.js'
+import { BLEND_MODES } from './visualComposite.js'
 import PreviewAssetList from './components/PreviewAssetList.vue'
 import {describeModel} from './modelLibrary.js'
 import './editorTheme.css'
@@ -52,6 +54,7 @@ import { assetStore } from './assetStore.js'
 import { clipVisible } from './sceneProject.js'
 import { useSceneEditor } from './composables/useSceneEditor.js'
 const sceneSettings=ref(null)
+function changeBlendMode(value){endEdit();beginEdit();try{editClip(selected.value.id,{blendMode:value})}finally{endEdit()}}
 const backgroundImageInput=ref(null)
 const audioInput=ref(null),audioImportTrack=ref(0)
 function importAudio(track){audioImportTrack.value=Number(track)||0;audioInput.value?.click()}

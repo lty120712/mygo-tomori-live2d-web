@@ -4,6 +4,7 @@ import { normalizeParamValues } from './params.js'
 import { AUDIO_CLIP_LIMIT, AUDIO_TRACK_LIMIT, BACKGROUND_CLIP_LIMIT, VIDEO_CLIP_LIMIT, createAudioClip, createColorBackgroundClip, createImageBackgroundClip, createImageClip, visualClips } from './mediaTracks.js'
 import { normalizeVolumeKeyframes } from './audioVolume.js'
 import { normalizeAudioFilter } from './audioFilters.js'
+import { normalizeBlendMode } from './visualComposite.js'
 
 export const SCENE_VERSION = 4
 export const SCENE_WIDTH = 960
@@ -20,7 +21,7 @@ export function createClip(model, start = 0, duration = 5, track = 0) {
     id: uid(), model: model.category + '/' + model.name, entry: model.entry || 'model.json',
     name: model.name, layerName:model.name, layerLocked:false, layerHidden:false, layerSolo:false, track, start, duration, offset: 0,
     transform: { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1 },
-    mouseTrack: true, params: {}, keyframes: {}, events: [],
+    mouseTrack: true, blendMode:'source-over', params: {}, keyframes: {}, events: [],
   }
 }
 export function clipVisible(clip, time) {
@@ -108,6 +109,7 @@ export function readProject(data, models) {
     clip.name = typeof raw.name === 'string' ? raw.name : model.name
     clip.layerName = typeof raw.layerName==='string' && raw.layerName.trim() ? raw.layerName.trim().slice(0,100) : model.name
     clip.mouseTrack = raw.mouseTrack !== false
+    clip.blendMode = normalizeBlendMode(raw.blendMode)
     clip.layerLocked = raw.layerLocked === true
     clip.layerHidden = raw.layerHidden === true
     clip.layerSolo = raw.layerSolo === true
@@ -141,6 +143,7 @@ export function readProject(data, models) {
       if (!raw || typeof raw.assetId !== 'string' || !raw.assetId.trim()) throw new Error('图片片段缺少素材引用')
       const video = raw.media === 'video'
       const clip = createImageClip({ id: raw.assetId, name: typeof raw.name === 'string' ? raw.name : (video ? '视频' : '图片'), width: number(raw.width, 320, 1, 65536), height: number(raw.height, 180, 1, 65536) })
+      clip.blendMode = normalizeBlendMode(raw.blendMode)
       if (video) {
         clip.media = 'video'
         clip.videoMuted = raw.videoMuted === true

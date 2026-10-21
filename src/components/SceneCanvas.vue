@@ -39,6 +39,7 @@ import {selectionBounds,boxSelected,moveSelection,scaleSelection,rotateSelection
 import {isPanButton,panOffset} from '../canvasPan.js'
 import { usePreviewFullscreen } from '../composables/usePreviewFullscreen.js'
 import { formatTimecode } from '../timecode.js'
+import { applyVisualComposite } from '../visualComposite.js'
 const fullscreenRoot=ref(null),exitFullscreenButton=ref(null)
 const fullscreen=usePreviewFullscreen(fullscreenRoot)
 const controlsVisible=ref(true)
@@ -256,7 +257,7 @@ function paint() {
           const t=pose(clip),dimensions=mediaDimensions(clip)
           ctx.save();ctx.translate(size.value.width/2+t.x,size.value.height/2+t.y)
           ctx.rotate(t.rotation*Math.PI/180);ctx.scale(t.scale,t.scale)
-          ctx.globalAlpha=Math.max(0,Math.min(1,t.opacity))
+          applyVisualComposite(ctx,clip,t.opacity)
           ctx.drawImage(source,-dimensions.width/2,-dimensions.height/2,dimensions.width,dimensions.height);ctx.restore()
         }
         continue
@@ -267,7 +268,7 @@ function paint() {
           const t=pose(clip),dimensions=mediaDimensions(clip)
           ctx.save();ctx.translate(size.value.width/2+t.x,size.value.height/2+t.y)
           ctx.rotate(t.rotation*Math.PI/180);ctx.scale(t.scale,t.scale)
-          ctx.globalAlpha=Math.max(0,Math.min(1,t.opacity))
+          applyVisualComposite(ctx,clip,t.opacity)
           ctx.drawImage(source,-dimensions.width/2,-dimensions.height/2,dimensions.width,dimensions.height);ctx.restore()
         }
         continue
@@ -299,7 +300,7 @@ function paint() {
       ctx.translate(size.value.width/2 + t.x, size.value.height/2 + t.y)
       ctx.rotate(t.rotation * Math.PI / 180)
       ctx.scale(t.scale, t.scale)
-      ctx.globalAlpha = Math.max(0, Math.min(1, t.opacity))
+      applyVisualComposite(ctx,clip,t.opacity)
       ctx.drawImage(source, -480, -270, 960, 540)
       ctx.restore()
     }

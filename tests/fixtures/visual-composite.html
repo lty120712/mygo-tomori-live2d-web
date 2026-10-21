@@ -1,0 +1,31 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>视觉混合像素回归</title>
+<body><h1>视觉混合像素回归</h1><pre id="result">验证中</pre><canvas width="2" height="1"></canvas>
+<script type="module">
+import { BLEND_MODES,applyVisualComposite } from '../../src/visualComposite.js'
+const ctx=document.querySelector('canvas').getContext('2d'),results=[]
+const expected={
+  'source-over':[200,100,50],multiply:[78,59,39],screen:[222,191,211],overlay:[157,127,167],
+  'hard-light':[188,118,78],darken:[100,100,50],lighten:[200,150,200],difference:[100,50,150],exclusion:[143,132,172],
+}
+function paint(mode,opacity=1){
+  ctx.globalCompositeOperation='source-over';ctx.globalAlpha=1
+  ctx.fillStyle='rgb(100,150,200)';ctx.fillRect(0,0,2,1)
+  ctx.save();applyVisualComposite(ctx,{blendMode:mode},opacity)
+  const supported=ctx.globalCompositeOperation===mode
+  ctx.fillStyle='rgb(200,100,50)';ctx.fillRect(0,0,1,1);ctx.restore()
+  const rgb=[...ctx.getImageData(0,0,1,1).data].slice(0,3)
+  ctx.fillRect(1,0,1,1)
+  const next=[...ctx.getImageData(1,0,1,1).data].slice(0,3)
+  const restored=ctx.globalCompositeOperation==='source-over' && ctx.globalAlpha===1 && next.every((v,i)=>v===[100,150,200][i])
+  return {supported,rgb,restored}
+}
+for(const mode of BLEND_MODES){
+  const r=paint(mode.value),want=expected[mode.value]
+  results.push({mode:mode.label,...r,pass:r.supported && r.restored && (!want || r.rgb.every((v,i)=>Math.abs(v-want[i])<=2))})
+}
+for(const [opacity,want] of [[0,[100,150,200]],[.5,[150,125,125]],[1,[200,100,50]]]){
+  const r=paint('source-over',opacity)
+  results.push({opacity,...r,pass:r.restored && r.rgb.every((v,i)=>Math.abs(v-want[i])<=1)})
+}
+document.querySelector('#result').textContent=JSON.stringify({passed:results.every(r=>r.pass),results},null,2)
+</script></body></html>

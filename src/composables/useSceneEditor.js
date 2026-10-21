@@ -1,6 +1,7 @@
 import { visualClips, visualLayerFilter, createImageClip, createVideoClip, isVideoClip, appendVisualClips, visualClipLimit, backgroundAtTime, backgroundClipLimit, createClipFromTemplate, createColorBackgroundClip, createImageBackgroundClip, planBackgroundAdd, migrateLegacyBackground, mediaClipPlacement, VIDEO_CLIP_LIMIT, AUDIO_TRACK_LIMIT, audioClipLimit, audioClipPlacement, audioClipTemplate, createAudioClip, createAudioClipFromTemplate, splitAudioClip } from '../mediaTracks.js'
 import { createAudioScheduler } from '../audioScheduler.js'
 import { sceneAudioClips } from '../sceneAudio.js'
+import { normalizeBlendMode } from '../visualComposite.js'
 import { normalizeVolumeKeyframes } from '../audioVolume.js'
 import { normalizeAudioFilter } from '../audioFilters.js'
 import { assetStore } from '../assetStore.js'
@@ -61,12 +62,12 @@ export function useSceneEditor() {
     return state
   }
   const selectedPose = computed(()=>selected.value ? sampleState(selected.value) : {params:{},transform:{}})
-  const paramLabels = computed(()=>Object.fromEntries([['@x','位置 X'],['@y','位置 Y'],['@scale','缩放'],['@rotation','旋转'],['@opacity','透明度'],...(runtime.value?.groups || []).flatMap(g=>g.params.map(p=>[p.key,p.label]))]))
+  const paramLabels = computed(()=>Object.fromEntries([['@x','位置 X'],['@y','位置 Y'],['@scale','缩放'],['@rotation','旋转'],['@opacity','不透明度'],...(runtime.value?.groups || []).flatMap(g=>g.params.map(p=>[p.key,p.label]))]))
   const visibleParams = computed(()=> {
     const query=paramSearch.value.trim().toLowerCase()
     return (runtime.value?.groups || []).flatMap(g=>g.params).filter(p=>query ? (p.label+' '+p.key).toLowerCase().includes(query) : allParams.value || p.common)
   })
-  const transformFields = [{key:'x',label:'位置 X',min:-1920,max:1920,step:1},{key:'y',label:'位置 Y',min:-1080,max:1080,step:1},{key:'scale',label:'缩放',min:.1,max:5,step:.01},{key:'rotation',label:'旋转',min:-180,max:180,step:1},{key:'opacity',label:'透明度',min:0,max:1,step:.01}]
+  const transformFields = [{key:'x',label:'位置 X',min:-1920,max:1920,step:1},{key:'y',label:'位置 Y',min:-1080,max:1080,step:1},{key:'scale',label:'缩放',min:.1,max:5,step:.01},{key:'rotation',label:'旋转',min:-180,max:180,step:1},{key:'opacity',label:'不透明度',min:0,max:1,step:.01}]
   const snapshot = value => JSON.parse(JSON.stringify(value))
   const historyRevision = ref(0)
   const history = createEditHistory({
@@ -410,7 +411,7 @@ export function useSceneEditor() {
   }
   function editClip(id,patch) {
     if(locked.value)return
-    const clip=allClips.value.find(c=>c.id===id);if(!clip)return
+    const clip=allClips.value.find(c=>c.id===id);if(!clip || clip.layerLocked)return
     const merged={...clip,...patch},min=1/project.fps
     if(![merged.start,merged.duration,merged.offset,merged.track].every(Number.isFinite))return
     merged.start=Math.round(Math.max(0,Math.min(project.duration-min,merged.start))*project.fps)/project.fps
@@ -421,6 +422,7 @@ export function useSceneEditor() {
     }
     if(merged.track!==clip.track){const target=allClips.value.find(c=>c.id!==id && c.track===merged.track);if(target?.layerLocked){message.value='目标图层已锁定';return}if(target){clip.layerName=target.layerName || target.name;clip.layerLocked=!!target.layerLocked;clip.layerHidden=!!target.layerHidden}}
     Object.assign(clip,{start:merged.start,duration:merged.duration,offset:merged.offset,track:merged.track})
+    if('blendMode' in patch)clip.blendMode=normalizeBlendMode(patch.blendMode)
     if(isVideoClip(clip)){
       if('videoMuted' in patch)clip.videoMuted=patch.videoMuted===true
       if('videoVolume' in patch && Number.isFinite(patch.videoVolume))clip.videoVolume=Math.max(0,Math.min(1,patch.videoVolume))
