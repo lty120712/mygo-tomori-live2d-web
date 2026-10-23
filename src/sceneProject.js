@@ -5,7 +5,7 @@ import { VISUAL_TRACK_LIMIT, AUDIO_CLIP_LIMIT, AUDIO_TRACK_LIMIT, BACKGROUND_CLI
 import { normalizeVolumeKeyframes } from './audioVolume.js'
 import { normalizeAudioFilter } from './audioFilters.js'
 import { normalizeBlendMode } from './visualComposite.js'
-import { isTextClip, normalizeText, normalizeTextStyle, TEXT_CLIP_LIMIT } from './textTracks.js'
+import { isTextClip, normalizeText, normalizeSpeaker, normalizeTextStyle, TEXT_CLIP_LIMIT } from './textTracks.js'
 
 export const SCENE_VERSION = 4
 export const SCENE_WIDTH = 960
@@ -147,7 +147,7 @@ export function readProject(data, models) {
       const video = raw.media === 'video'
       const clip = createImageClip({ id: raw.assetId, name: typeof raw.name === 'string' ? raw.name : (video ? '视频' : '图片'), width: number(raw.width, 320, 1, 65536), height: number(raw.height, 180, 1, 65536) })
       clip.blendMode = normalizeBlendMode(raw.blendMode)
-      if(text){delete clip.assetId;clip.media='text';clip.text=normalizeText(raw.text);clip.textStyle=normalizeTextStyle(raw.textStyle)}
+      if(text){delete clip.assetId;clip.media='text';clip.text=normalizeText(raw.text);clip.speaker=normalizeSpeaker(raw.speaker);clip.textStyle=normalizeTextStyle(raw.textStyle)}
       if (video) {
         clip.media = 'video'
         clip.videoMuted = raw.videoMuted === true

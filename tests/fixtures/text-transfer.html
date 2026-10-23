@@ -11,7 +11,7 @@ import MultiTimeline from '../../src/components/MultiTimeline.vue'
 import AssetLibrary from '../../src/components/AssetLibrary.vue'
 import {createTextClip} from '../../src/mediaTracks.js'
 import {applyTextTransfer,planTextAdd} from '../../src/textClipPlacement.js'
-import {textPreset} from '../../src/textPresets.js'
+import {applyTextPreset} from '../../src/textPresets.js'
 import {createEditHistory} from '../../src/editHistory.js'
 createApp({setup(){
   const make=(id,track,start)=>({...createTextClip(start,2,track),id,name:id,layerName:'文字层'+track})
@@ -19,7 +19,7 @@ createApp({setup(){
   function add(presetId){
     const track=clips.value.find(c=>c.id===selected.value[0])?.track,plan=planTextAdd(clips.value,time.value,{selectedTrack:track,duration:duration.value,fps:30})
     if(plan.error)return
-    history.edit(()=>{const p=textPreset(presetId),clip={...createTextClip(plan.start,plan.duration,plan.track ?? 22),...plan.layer,text:p.text};clips.value.push(clip);duration.value=plan.projectDuration;selected.value=[clip.id];time.value=clip.start})
+    history.edit(()=>{const clip={...applyTextPreset(createTextClip(plan.start,plan.duration,plan.track ?? 22),presetId),...plan.layer};clips.value.push(clip);duration.value=plan.projectDuration;selected.value=[clip.id];time.value=clip.start})
   }
   const history=createEditHistory({capture:()=>({project:{clips:JSON.parse(JSON.stringify(clips.value)),duration:duration.value}}),restore:s=>{clips.value=s.project.clips;duration.value=s.project.duration}})
   return ()=>h('main',[

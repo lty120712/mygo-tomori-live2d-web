@@ -43,7 +43,7 @@ export function createVideoClip(asset, start = 0, duration = 5, track = 0) {
 export function createTextClip(start=0,duration=5,track=0){
   const clip=createImageClip({name:'文字'},start,duration,track)
   delete clip.assetId
-  return {...clip,id:uid('text'),media:'text',text:'请输入文字',textStyle:normalizeTextStyle()}
+  return {...clip,id:uid('text'),media:'text',text:'请输入文字',speaker:'',textStyle:normalizeTextStyle()}
 }
 // A scale of 100% fits the original aspect ratio inside the 960×540 reference canvas.
 // Store source dimensions on the clip so geometry survives missing local assets.

@@ -3,9 +3,10 @@ import { createAudioScheduler } from '../audioScheduler.js'
 import { sceneAudioClips } from '../sceneAudio.js'
 import { normalizeBlendMode } from '../visualComposite.js'
 import { VISUAL_TRACK_LIMIT, createTextClip, isImageClip } from '../mediaTracks.js'
-import { isTextClip, normalizeText, normalizeTextStyle, TEXT_CLIP_LIMIT } from '../textTracks.js'
+import { isTextClip, normalizeText, normalizeSpeaker, normalizeTextStyle, TEXT_CLIP_LIMIT } from '../textTracks.js'
 import { planTextAdd,applyTextTransfer } from '../textClipPlacement.js'
-import { textPreset } from '../textPresets.js'
+import { applyTextPreset } from '../textPresets.js'
+import { sceneSize } from '../sceneProject.js'
 import { normalizeVolumeKeyframes } from '../audioVolume.js'
 import { normalizeAudioFilter } from '../audioFilters.js'
 import { assetStore } from '../assetStore.js'
@@ -216,8 +217,7 @@ export function useSceneEditor() {
     const placement=planTextAdd(allClips.value,time.value,{duration:project.duration,fps:project.fps,selectedTrack:selected.value?.track})
     if(placement.error){message.value=placement.error;return}
     const clip=createTextClip(placement.start,placement.duration,placement.track ?? insertFrontLayer(allClips.value))
-    const preset=textPreset(presetId)
-    clip.text=preset.text;clip.textStyle=normalizeTextStyle(preset.style)
+    applyTextPreset(clip,presetId,sceneSize(project.aspectRatio))
     if(placement.layer)Object.assign(clip,placement.layer)
     project.duration=placement.projectDuration
     project.imageClips.push(clip);selectCanvas([clip.id],clip.id);seek(clip.start)
@@ -226,6 +226,7 @@ export function useSceneEditor() {
     const clip=selected.value
     if(!isTextClip(clip) || clip.layerLocked)return
     if('text' in patch)clip.text=normalizeText(patch.text)
+    if('speaker' in patch)clip.speaker=normalizeSpeaker(patch.speaker)
     if(patch.textStyle)clip.textStyle=normalizeTextStyle({...clip.textStyle,...patch.textStyle})
   }
   function addImage(asset) {

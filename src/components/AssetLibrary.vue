@@ -32,7 +32,8 @@
         <div class="library-results text-presets">
           <p class="media-hint">选中文字轨道时追加到末尾，否则添加到播放头。</p>
           <button v-for="preset in TEXT_PRESETS" :key="preset.id" class="text-preset" :disabled="disabled" :aria-label="'添加'+preset.name" @click="emit('add-text',preset.id)">
-            <span class="text-preset-preview" :style="{fontFamily:preset.style.fontFamily,fontWeight:preset.style.bold ? 'bold' : 'normal'}">文字 Aa</span>
+            <span v-if="preset.style.layout==='dialogue'" class="text-preset-preview dialogue-preview" :style="{background:preset.style.boxColor || '#302b38',color:preset.style.color || '#ffffff',borderRadius:(preset.style.boxRadius || 0)+'px'}"><b :style="{color:preset.style.speakerColor}">{{preset.speaker}}</b><i></i><span>{{preset.text}}</span></span>
+            <span v-else class="text-preset-preview" :style="{fontFamily:preset.style.fontFamily,fontWeight:preset.style.bold ? 'bold' : 'normal'}">文字 Aa</span>
             <strong>{{preset.name}}</strong><small>{{preset.description}}</small><span class="add-mark">＋</span>
           </button>
         </div>
@@ -123,6 +124,7 @@ onBeforeUnmount(() => window.removeEventListener('tomori-assets-changed', refres
 .asset-tabs { flex-wrap:wrap; }.asset-tabs button { min-width:65px; }
 .text-presets { padding:12px 16px; }.text-preset { position:relative; display:flex; flex-direction:column; gap:9px; width:100%; padding:14px; border:1px solid var(--editor-border); border-radius:12px; background:var(--editor-soft); color:var(--editor-text); text-align:left; }
 .text-preset-preview { display:grid; place-items:center; width:100%; height:80px; background:var(--editor-panel); border-radius:8px; font-size:28px; }.text-preset small { color:var(--editor-muted); line-height:1.5; }.text-preset .add-mark { position:absolute; right:14px; bottom:12px; }
+.text-presets { display:flex; flex-direction:column; gap:12px; }.text-preset { flex-shrink:0; }.dialogue-preview { display:flex; flex-direction:column; align-items:stretch; justify-content:flex-start; gap:7px; font-size:11px; padding:10px; box-sizing:border-box; overflow:hidden; }.dialogue-preview b { font-size:12px; }.dialogue-preview i { border-top:1px solid currentColor; opacity:.35; }.dialogue-preview>span { font-size:11px; line-height:1.5; }
 .asset-library { position:relative; }
 .drop-overlay { position:absolute; inset:0; display:grid; place-items:center; background:var(--editor-panel); border:2px dashed var(--editor-accent); z-index:5; pointer-events:none; }
 .import-status { position:absolute; bottom:36px; left:8px; right:8px; padding:8px; margin:0; font-size:11px; background:var(--editor-panel); border:1px solid var(--editor-border); border-radius:8px; max-height:100px; overflow:auto; overflow-wrap:anywhere; }

@@ -1,0 +1,24 @@
+<!doctype html><html lang="zh-CN"><meta charset="UTF-8"><title>对白框隔离验证</title>
+<style>
+:root { font:13px system-ui,sans-serif; --editor-panel:#fff; --editor-soft:#f6f3f5; --editor-text:#342e35; --editor-muted:#817580; --editor-accent:#743a52; --editor-border:#ded5dc; --editor-focus:#ac7991; --editor-accent-soft:#f3e4eb; --editor-hover:#f6eaf0; --editor-radius:6px; }
+body { margin:0; background:#f6f3f5; color:#342e35; }header { padding:10px 16px; }#workspace { display:grid; grid-template-columns:260px minmax(0,1fr) 290px; gap:12px; align-items:start; }aside { max-height:90vh; overflow:auto; padding:10px; background:white; }label { display:block; margin:8px 0; }input,select,textarea { max-width:100%; box-sizing:border-box; }input:not([type=color]):not([type=checkbox]):not([type=range]),select { padding:5px; width:100%; }button { cursor:pointer; }#preview { min-width:0; background:#7a8c9f; }#preview .scene-preview { height:460px; }.text-inspector>label select { width:100%; }
+</style><div id="app"></div><script type="module">
+import {createApp,h,ref} from 'vue'
+import SceneCanvas from '../../src/components/SceneCanvas.vue'
+import AssetLibrary from '../../src/components/AssetLibrary.vue'
+import TextInspector from '../../src/components/TextInspector.vue'
+import {createTextClip} from '../../src/mediaTracks.js'
+import {applyTextPreset} from '../../src/textPresets.js'
+import {normalizeText,normalizeSpeaker,normalizeTextStyle} from '../../src/textTracks.js'
+import {createProject,readProject} from '../../src/sceneProject.js'
+import {createEditHistory} from '../../src/editHistory.js'
+createApp({setup(){
+  const clip=ref(applyTextPreset(createTextClip(),'dialogue-dark')),notice=ref('隔离验证，不会保存到用户工程')
+  const history=createEditHistory({capture:()=>({project:JSON.parse(JSON.stringify(clip.value))}),restore:s=>{clip.value=s.project}})
+  function edit(patch){history.edit(()=>{if('text' in patch)clip.value.text=normalizeText(patch.text);if('speaker' in patch)clip.value.speaker=normalizeSpeaker(patch.speaker);if(patch.textStyle)clip.value.textStyle=normalizeTextStyle({...clip.value.textStyle,...patch.textStyle})})}
+  function preset(id){history.end();history.edit(()=>{clip.value=applyTextPreset(createTextClip(),id)})}
+  function roundTrip(){const p=createProject();p.imageClips=[JSON.parse(JSON.stringify(clip.value))];clip.value=readProject(JSON.parse(JSON.stringify(p)),[]).imageClips[0];notice.value='工程往返成功：'+clip.value.speaker+' / '+clip.value.textStyle.layout}
+  return ()=>h('main',[h('header',[notice.value,' ',h('button',{onClick:()=>history.undo()},'撤销'),h('button',{onClick:()=>history.redo()},'重做'),h('button',{onClick:roundTrip},'工程往返验证')]),
+    h('div',{id:'workspace'},[h(AssetLibrary,{open:true,onAddText:preset}),h('section',{id:'preview'},[h(SceneCanvas,{clips:[clip.value],time:0,duration:5,fps:30,aspectRatio:'16:9',selected:clip.value,selectedIds:[],runtimes:{},background:'#7a8c9f',playing:false})]),h('aside',[h(TextInspector,{clip:clip.value,onEdit:edit,onBeginEdit:()=>history.begin(),onEndEdit:()=>history.end()})])])])
+}}).mount('#app')
+</script></html>
