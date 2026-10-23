@@ -5,7 +5,7 @@ import { VISUAL_TRACK_LIMIT, AUDIO_CLIP_LIMIT, AUDIO_TRACK_LIMIT, BACKGROUND_CLI
 import { normalizeVolumeKeyframes } from './audioVolume.js'
 import { normalizeAudioFilter } from './audioFilters.js'
 import { normalizeBlendMode } from './visualComposite.js'
-import { isTextClip, normalizeText, normalizeTextStyle } from './textTracks.js'
+import { isTextClip, normalizeText, normalizeTextStyle, TEXT_CLIP_LIMIT } from './textTracks.js'
 
 export const SCENE_VERSION = 4
 export const SCENE_WIDTH = 960
@@ -139,7 +139,7 @@ export function readProject(data, models) {
   })
   if (data.version === 4 && data.imageClips != null) {
     if (!Array.isArray(data.imageClips)) throw new Error('图片片段列表无效')
-    if (data.imageClips.length > 128) throw new Error('单个工程的视觉素材片段过多')
+    if (data.imageClips.length > 64+VIDEO_CLIP_LIMIT+TEXT_CLIP_LIMIT) throw new Error('单个工程的视觉素材片段过多')
     if (data.imageClips.filter(c=>!isTextClip(c)).length > 96) throw new Error('单个工程的图片与视频片段过多')
     project.imageClips = data.imageClips.map((raw, index) => {
       const text=isTextClip(raw)
@@ -174,7 +174,7 @@ export function readProject(data, models) {
     })
     if (project.imageClips.filter(c => c.media === 'video').length > VIDEO_CLIP_LIMIT) throw new Error('单个工程最多 32 个视频片段')
     if (project.imageClips.filter(c => c.media !== 'video' && !isTextClip(c)).length > 64) throw new Error('单个工程最多 64 个图片片段')
-    if (project.imageClips.filter(isTextClip).length > 32) throw new Error('单个工程最多 32 个文字片段')
+    if (project.imageClips.filter(isTextClip).length > TEXT_CLIP_LIMIT) throw new Error(`单个工程最多 ${TEXT_CLIP_LIMIT} 个文字片段`)
   }
   if (data.version === 4 && data.audioTrackState != null) {
     if (typeof data.audioTrackState !== 'object' || Array.isArray(data.audioTrackState)) throw new Error('音频轨道状态无效')

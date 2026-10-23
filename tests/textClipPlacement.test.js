@@ -1,12 +1,36 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {textPlacement,planTextTransfer,applyTextTransfer} from '../src/textClipPlacement.js'
+import {textPlacement,planTextAdd,planTextTransfer,applyTextTransfer} from '../src/textClipPlacement.js'
 import {createEditHistory} from '../src/editHistory.js'
 import {createProject,readProject} from '../src/sceneProject.js'
 import {createTextClip} from '../src/mediaTracks.js'
 
 const text=(id,track,start,duration=2)=>({id,media:'text',track,start,duration,text:'原文字',offset:1,textStyle:{fontSize:48},keyframes:{'@opacity':[{frame:30,value:.4}]},layerName:'文字层'+track})
 const options={duration:20,fps:30}
+test('选中文字轨时忽略播放头，在整条轨道最后追加并延长工程',()=>{
+  const clips=[text('a',0,0),text('b',0,8),text('c',1,0)]
+  const plan=planTextAdd(clips,0,{selectedTrack:0,duration:10,fps:30})
+  assert.equal(plan.track,0);assert.equal(plan.start,10);assert.equal(plan.duration,5);assert.equal(plan.projectDuration,15)
+  assert.equal(plan.layer.layerName,'文字层0')
+  const other=planTextAdd(clips,4,{selectedTrack:1,duration:20,fps:30})
+  assert.equal(other.track,1);assert.equal(other.start,2)
+})
+test('选中锁定文字轨拒绝追加，600秒末尾截断或提示而不另建一行',()=>{
+  const clips=[{...text('a',0,0),layerLocked:true}]
+  assert.ok(planTextAdd(clips,0,{selectedTrack:0,duration:10}).error)
+  clips[0].layerLocked=false;clips[0].start=597
+  const plan=planTextAdd(clips,0,{selectedTrack:0,duration:600})
+  assert.equal(plan.start,599);assert.equal(plan.duration,1)
+  clips[0].duration=3
+  assert.ok(planTextAdd(clips,0,{selectedTrack:0,duration:600}).error)
+})
+test('未选文字轨时保留播放头放置规则，不把文字追加到模型轨',()=>{
+  const clips=[text('a',0,0),{id:'m',model:'m',track:1,start:0,duration:10}]
+  const plan=planTextAdd(clips,4,{selectedTrack:1,duration:10})
+  assert.equal(plan.start,4);assert.equal(plan.track,0)
+  const occupied=planTextAdd(clips,1,{duration:10})
+  assert.equal(occupied.track,undefined);assert.equal(occupied.start,1)
+})
 test('添加文字复用空档，优先选中轨道，遇到下一片段缩短时长',()=>{
   const clips=[text('a',0,0),text('b',0,6),text('c',1,0)]
   assert.equal(textPlacement(clips,3,5).track,0)

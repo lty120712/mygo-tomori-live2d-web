@@ -4,6 +4,7 @@
     <div v-show="open" class="library-body">
       <header><div><small>ASSETS</small><h3>素材库</h3></div><button class="collapse-trigger" aria-label="收起素材库" title="收起素材库，为画布留出空间" @click="emit('toggle')">‹</button></header>
       <nav class="asset-tabs" aria-label="素材分类">
+        <button :aria-current="activeTab==='text' ? 'page' : undefined" @click="switchTab('text')">文字<span>{{TEXT_PRESETS.length}}</span></button>
         <button :aria-current="activeTab==='model' ? 'page' : undefined" @click="switchTab('model')">模型<span>{{ models.length }}</span></button>
         <button :aria-current="activeTab==='image' ? 'page' : undefined" @click="switchTab('image')">图片<span>{{ assets.filter(a=>a.kind==='image').length }}</span></button>
         <button :aria-current="activeTab==='audio' ? 'page' : undefined" @click="switchTab('audio')">音频<span>{{ assets.filter(a=>a.kind==='audio').length }}</span></button>
@@ -27,6 +28,16 @@
         <footer><span class="hint-dot"></span>点击添加到场景，同一素材可重复使用</footer>
       </template>
 
+      <template v-else-if="activeTab==='text'">
+        <div class="library-results text-presets">
+          <p class="media-hint">选中文字轨道时追加到末尾，否则添加到播放头。</p>
+          <button v-for="preset in TEXT_PRESETS" :key="preset.id" class="text-preset" :disabled="disabled" :aria-label="'添加'+preset.name" @click="emit('add-text',preset.id)">
+            <span class="text-preset-preview" :style="{fontFamily:preset.style.fontFamily,fontWeight:preset.style.bold ? 'bold' : 'normal'}">文字 Aa</span>
+            <strong>{{preset.name}}</strong><small>{{preset.description}}</small><span class="add-mark">＋</span>
+          </button>
+        </div>
+        <footer><span class="hint-dot"></span>文字可重复添加，内容与样式随工程保存</footer>
+      </template>
       <template v-else>
         <div class="media-toolbar">
           <button class="import-btn" :disabled="disabled || importing" @click="pickFile">{{ importing ? '正在导入…' : '批量导入'+(activeTab==='image' ? '图片' : activeTab==='video' ? '视频' : '音频') }}</button>
@@ -58,8 +69,9 @@ import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import ModelPortrait from './ModelPortrait.vue'
 import { describeModel, filterModelLibrary } from '../modelLibrary.js'
 import { assetStore } from '../assetStore.js'
+import { TEXT_PRESETS } from '../textPresets.js'
 const props = defineProps({ models: { type: Array, default: () => [] }, clips: { type: Array, default: () => [] }, audioClips: { type: Array, default: () => [] }, backgroundClips: { type: Array, default: () => [] }, open: Boolean, disabled: Boolean })
-const emit = defineEmits(['toggle', 'add', 'add-image', 'background-image', 'add-audio', 'add-video'])
+const emit = defineEmits(['toggle', 'add', 'add-image', 'background-image', 'add-audio', 'add-video', 'add-text'])
 const referenced = asset => [...props.clips, ...props.backgroundClips, ...props.audioClips].some(c => c.assetId === asset.id)
 const activeTab = ref('model')
 const assets = ref([])
@@ -108,6 +120,9 @@ onMounted(() => { refreshAssets(); window.addEventListener('tomori-assets-change
 onBeforeUnmount(() => window.removeEventListener('tomori-assets-changed', refreshAssets))
 </script>
 <style scoped>
+.asset-tabs { flex-wrap:wrap; }.asset-tabs button { min-width:65px; }
+.text-presets { padding:12px 16px; }.text-preset { position:relative; display:flex; flex-direction:column; gap:9px; width:100%; padding:14px; border:1px solid var(--editor-border); border-radius:12px; background:var(--editor-soft); color:var(--editor-text); text-align:left; }
+.text-preset-preview { display:grid; place-items:center; width:100%; height:80px; background:var(--editor-panel); border-radius:8px; font-size:28px; }.text-preset small { color:var(--editor-muted); line-height:1.5; }.text-preset .add-mark { position:absolute; right:14px; bottom:12px; }
 .asset-library { position:relative; }
 .drop-overlay { position:absolute; inset:0; display:grid; place-items:center; background:var(--editor-panel); border:2px dashed var(--editor-accent); z-index:5; pointer-events:none; }
 .import-status { position:absolute; bottom:36px; left:8px; right:8px; padding:8px; margin:0; font-size:11px; background:var(--editor-panel); border:1px solid var(--editor-border); border-radius:8px; max-height:100px; overflow:auto; overflow-wrap:anywhere; }

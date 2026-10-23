@@ -2,6 +2,19 @@ import { isTextClip } from './textTracks.js'
 
 const overlaps=(a,b)=>a.start<b.start+b.duration-1e-8 && a.start+a.duration>b.start+1e-8
 const layerFields=['layerName','layerLocked','layerHidden','layerSolo']
+export function planTextAdd(clips,time,{selectedTrack,duration,fps=30,length=5}={}){
+  const members=clips.filter(c=>c.track===selectedTrack)
+  if(members.length && members.every(isTextClip)){
+    if(members.some(c=>c.layerLocked))return {error:'选中的文字轨道已锁定，请先解锁'}
+    const start=Math.round(Math.max(...members.map(c=>c.start+c.duration))*fps)/fps
+    const available=Math.min(length,600-start)
+    if(available<1/fps-1e-8)return {error:'文字轨道已到 600 秒工程上限，无法继续追加'}
+    return {start,duration:available,track:selectedTrack,projectDuration:Math.max(duration,start+available),layer:Object.fromEntries(layerFields.map(key=>[key,members[0][key]]))}
+  }
+  const start=Math.round(Math.max(0,Math.min(time,duration-1/fps))*fps)/fps
+  const placement=textPlacement(clips,start,Math.min(length,duration-start),{fps})
+  return {start,duration:Math.min(length,duration-start),projectDuration:duration,...placement}
+}
 export function textPlacement(clips,start,duration,{fps=30,preferredTrack}={}){
   const tracks=[...new Set(clips.filter(isTextClip).map(c=>c.track))].sort((a,b)=>a-b)
   if(tracks.includes(preferredTrack)){tracks.splice(tracks.indexOf(preferredTrack),1);tracks.unshift(preferredTrack)}

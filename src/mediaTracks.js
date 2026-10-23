@@ -8,7 +8,7 @@ export { audioGainAt, normalizeVolumeKeyframes } from './audioVolume.js'
 export { AUDIO_FILTER_PRESETS, audioFilterLabel, audioFilterSpec, normalizeAudioFilter } from './audioFilters.js'
 
 export const VIDEO_CLIP_LIMIT = 32
-export const VISUAL_TRACK_LIMIT = 144
+export const VISUAL_TRACK_LIMIT = 16+64+VIDEO_CLIP_LIMIT+TEXT_CLIP_LIMIT
 /** 素材片段（图片或视频）：画面来自素材而不是 Live2D 模型，两者共用同一套结构（transform / 关键帧 / 裁剪 / 切割）。 */
 export const isMediaClip = clip => (!!clip?.assetId || isTextClip(clip)) && !clip.model
 /** 视频与图片片段都用 media 标记画面来源；缺少标记的旧工程片段按图片处理。 */
@@ -20,7 +20,7 @@ export function visualClipLimit(clips) {
   if (clips.filter(c => !isMediaClip(c)).length > 16) return '单个工程最多 16 个模型片段'
   if (clips.filter(isVideoClip).length > VIDEO_CLIP_LIMIT) return '单个工程最多 32 个视频片段'
   if (clips.filter(isImageClip).length > 64) return '单个工程最多 64 个图片片段'
-  if (clips.filter(isTextClip).length > TEXT_CLIP_LIMIT) return '单个工程最多 32 个文字片段'
+  if (clips.filter(isTextClip).length > TEXT_CLIP_LIMIT) return `单个工程最多 ${TEXT_CLIP_LIMIT} 个文字片段`
   return ''
 }
 export function appendVisualClips(project, clips) {

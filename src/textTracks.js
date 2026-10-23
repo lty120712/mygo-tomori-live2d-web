@@ -1,4 +1,4 @@
-export const TEXT_CLIP_LIMIT=32
+export const TEXT_CLIP_LIMIT=512
 export const TEXT_FONTS=[{value:'sans-serif',label:'系统黑体'},{value:'serif',label:'系统宋体'},{value:'monospace',label:'等宽字体'},{value:'Microsoft YaHei',label:'微软雅黑'},{value:'KaiTi',label:'楷体'}]
 export const isTextClip=clip=>clip?.media==='text' && !clip.model
 const clamp=(value,fallback,min,max)=>Number.isFinite(Number(value)) ? Math.max(min,Math.min(max,Number(value))) : fallback

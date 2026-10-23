@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createTextClip, createImageClip, createVideoClip, isMediaClip, isImageClip, visualClipLimit, visualPose } from '../src/mediaTracks.js'
-import { isTextClip, normalizeTextStyle, normalizeText, layoutText } from '../src/textTracks.js'
+import { isTextClip, normalizeTextStyle, normalizeText, layoutText, TEXT_CLIP_LIMIT } from '../src/textTracks.js'
 import { createProject, readProject, setClipKeyframe, sampleClip } from '../src/sceneProject.js'
 import { copyClips, planClipSplit, planClipPaste } from '../src/clipSelection.js'
 import { projectAssetIds, packProject, unpackProject, restoreBundle } from '../src/projectBundle.js'
@@ -9,7 +9,7 @@ import { projectAssetIds, packProject, unpackProject, restoreBundle } from '../s
 test('文字是独立视觉片段，不占图片/模型数量，也不需要素材文件',()=>{
   const text=createTextClip(1,5,2)
   assert.ok(isMediaClip(text));assert.ok(isTextClip(text));assert.equal(isImageClip(text),false)
-  assert.equal(text.assetId,undefined);assert.equal(visualClipLimit(Array.from({length:33},()=>createTextClip())),'单个工程最多 32 个文字片段')
+  assert.equal(text.assetId,undefined);assert.equal(visualClipLimit(Array.from({length:TEXT_CLIP_LIMIT+1},()=>createTextClip())),`单个工程最多 ${TEXT_CLIP_LIMIT} 个文字片段`)
   assert.equal(visualClipLimit([text,...Array.from({length:64},()=>createImageClip({id:'pic'}))]),'')
 })
 test('文字样式校验限制外部数据，中文换行与自动折行保持内容',()=>{
@@ -49,8 +49,15 @@ test('纯文字 .tomori 工程无需素材即可打包恢复，过量文字片�
   const bundle=await unpackProject(await packProject(p,store))
   const restored=readProject(await restoreBundle(bundle,store),[])
   assert.equal(restored.imageClips[0].text,'请输入文字');assert.deepEqual(bundle.assets,[])
-  p.imageClips=Array.from({length:33},()=>createTextClip())
-  assert.throws(()=>readProject(p,[]),/32 个文字片段/)
+  p.imageClips=Array.from({length:TEXT_CLIP_LIMIT+1},()=>createTextClip())
+  assert.throws(()=>readProject(p,[]),/512 个文字片段/)
+})
+test('大量文字片段与高层级工程可完整读回',()=>{
+  const p=createProject();p.duration=600
+  p.imageClips=Array.from({length:TEXT_CLIP_LIMIT},(_,i)=>createTextClip(i,1,i))
+  const restored=readProject(p,[])
+  assert.equal(restored.imageClips.length,TEXT_CLIP_LIMIT)
+  assert.equal(restored.imageClips.at(-1).track,TEXT_CLIP_LIMIT-1)
 })
 test('文字混排超过 80 层后，保存恢复不合并高编号图层',()=>{
   const p=createProject();p.imageClips=[createTextClip(0,5,90),createImageClip({id:'pic'},0,5,91)]

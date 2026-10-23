@@ -4,7 +4,8 @@ import { sceneAudioClips } from '../sceneAudio.js'
 import { normalizeBlendMode } from '../visualComposite.js'
 import { VISUAL_TRACK_LIMIT, createTextClip, isImageClip } from '../mediaTracks.js'
 import { isTextClip, normalizeText, normalizeTextStyle, TEXT_CLIP_LIMIT } from '../textTracks.js'
-import { textPlacement,applyTextTransfer } from '../textClipPlacement.js'
+import { planTextAdd,applyTextTransfer } from '../textClipPlacement.js'
+import { textPreset } from '../textPresets.js'
 import { normalizeVolumeKeyframes } from '../audioVolume.js'
 import { normalizeAudioFilter } from '../audioFilters.js'
 import { assetStore } from '../assetStore.js'
@@ -210,13 +211,16 @@ export function useSceneEditor() {
     clip.transform.x=allClips.value.length%2 ? 190 : -190
     project.clips.push(clip);selectCanvas([clip.id],clip.id)
   }
-  function addText(){
-    if(project.imageClips.filter(isTextClip).length>=TEXT_CLIP_LIMIT){message.value='单个工程最多 32 个文字片段';return}
-    const start=Math.min(time.value,project.duration-1/project.fps)
-    const placement=textPlacement(allClips.value,start,Math.min(5,project.duration-start),{fps:project.fps,preferredTrack:selected.value?.track})
-    const clip=createTextClip(start,placement?.duration ?? Math.min(5,project.duration-start),placement?.track ?? insertFrontLayer(allClips.value))
-    if(placement)Object.assign(clip,placement.layer)
-    project.imageClips.push(clip);selectCanvas([clip.id],clip.id)
+  function addText(presetId='basic'){
+    if(project.imageClips.filter(isTextClip).length>=TEXT_CLIP_LIMIT){message.value=`单个工程最多 ${TEXT_CLIP_LIMIT} 个文字片段`;return}
+    const placement=planTextAdd(allClips.value,time.value,{duration:project.duration,fps:project.fps,selectedTrack:selected.value?.track})
+    if(placement.error){message.value=placement.error;return}
+    const clip=createTextClip(placement.start,placement.duration,placement.track ?? insertFrontLayer(allClips.value))
+    const preset=textPreset(presetId)
+    clip.text=preset.text;clip.textStyle=normalizeTextStyle(preset.style)
+    if(placement.layer)Object.assign(clip,placement.layer)
+    project.duration=placement.projectDuration
+    project.imageClips.push(clip);selectCanvas([clip.id],clip.id);seek(clip.start)
   }
   function editText(patch){
     const clip=selected.value

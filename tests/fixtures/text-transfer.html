@@ -1,26 +1,38 @@
 <!doctype html>
 <html lang="zh-CN"><meta charset="UTF-8"><title>文字跨轨回归</title><body>
 <div id="app"></div>
+<style>
+:root { font-family:system-ui,sans-serif; --editor-panel:#fff; --editor-soft:#f6f3f5; --editor-text:#342e35; --editor-muted:#817580; --editor-accent:#743a52; --editor-border:#ded5dc; --editor-focus:#ac7991; --editor-accent-soft:#f3e4eb; --editor-hover:#f6eaf0; --editor-radius:6px; --editor-key:#986b28; }
+body { margin:12px; }pre { white-space:pre-wrap; overflow:auto; max-height:70px; font-size:10px; }.multi-timeline button { cursor:pointer; padding:4px 7px; border:1px solid var(--editor-border); border-radius:5px; background:var(--editor-soft); color:var(--editor-text); }
+</style>
 <script type="module">
 import {createApp,h,ref} from 'vue'
 import MultiTimeline from '../../src/components/MultiTimeline.vue'
+import AssetLibrary from '../../src/components/AssetLibrary.vue'
 import {createTextClip} from '../../src/mediaTracks.js'
-import {applyTextTransfer,textPlacement} from '../../src/textClipPlacement.js'
+import {applyTextTransfer,planTextAdd} from '../../src/textClipPlacement.js'
+import {textPreset} from '../../src/textPresets.js'
 import {createEditHistory} from '../../src/editHistory.js'
 createApp({setup(){
   const make=(id,track,start)=>({...createTextClip(start,2,track),id,name:id,layerName:'文字层'+track})
-  const clips=ref([make('文字甲',0,0),make('文字乙',0,5),make('文字丙',1,0)]),selected=ref([]),time=ref(0)
-  const history=createEditHistory({capture:()=>({project:structuredClone(clips.value.map(c=>JSON.parse(JSON.stringify(c))))}),restore:s=>{clips.value=s.project}})
+  const clips=ref([make('文字甲',0,0),make('文字乙',0,5),make('文字丙',1,0),...Array.from({length:18},(_,i)=>make('字幕'+(i+1),i+2,i%8)),{...make('模型示例',20,0),media:undefined,model:'fixture'}, {...make('图片示例',21,1),media:'image',assetId:'fixture-image'}]),selected=ref([]),time=ref(0),duration=ref(12)
+  function add(presetId){
+    const track=clips.value.find(c=>c.id===selected.value[0])?.track,plan=planTextAdd(clips.value,time.value,{selectedTrack:track,duration:duration.value,fps:30})
+    if(plan.error)return
+    history.edit(()=>{const p=textPreset(presetId),clip={...createTextClip(plan.start,plan.duration,plan.track ?? 22),...plan.layer,text:p.text};clips.value.push(clip);duration.value=plan.projectDuration;selected.value=[clip.id];time.value=clip.start})
+  }
+  const history=createEditHistory({capture:()=>({project:{clips:JSON.parse(JSON.stringify(clips.value)),duration:duration.value}}),restore:s=>{clips.value=s.project.clips;duration.value=s.project.duration}})
   return ()=>h('main',[
     h('p','隔离测试：不会读写用户工程。文字甲与乙共轨；可把甲拖到丙轨的空档或边缘。'),
     h('button',{onClick:()=>history.undo()},'撤销'),h('button',{onClick:()=>history.redo()},'重做'),
-    h('pre',{id:'result'},JSON.stringify(clips.value.map(({id,track,start,duration})=>({id,track,start,duration})))),
-    h(MultiTimeline,{clips:clips.value,selectedIds:selected.value,duration:12,fps:30,time:time.value,labels:{},pose:{},runtimes:{},transformFields:[],
+    h('pre',{id:'result'},JSON.stringify({duration:duration.value,clips:clips.value.filter(c=>c.track===0).map(({id,track,start,duration})=>({id,track,start,duration}))})),
+    h('div',{style:'display:flex;align-items:flex-start'},[h(AssetLibrary,{open:true,onAddText:add}),
+    h(MultiTimeline,{style:'flex:1;min-width:0;height:480px',clips:clips.value,selectedIds:selected.value,duration:duration.value,fps:30,time:time.value,labels:{},pose:{},runtimes:{},transformFields:[],
       onSelect:id=>{selected.value=[id]},onSelectionChange:ids=>{selected.value=ids},onSeek:value=>{time.value=Math.round(value*30)/30},
       onBeginEdit:()=>history.begin(),onEndEdit:()=>history.end(),
       onBatchClips:action=>{if(action.type==='transfer-text'){history.end();history.edit(()=>applyTextTransfer(clips.value,action,{duration:12,fps:30}))}},
-      onAddText:()=>{const p=textPlacement(clips.value,time.value,Math.min(5,12-time.value));if(p)history.edit(()=>clips.value.push({...createTextClip(time.value,p.duration,p.track),...p.layer}))}
-    })
+      onAddText:add
+    })])
   ])
 }}).mount('#app')
 </script></body></html>
