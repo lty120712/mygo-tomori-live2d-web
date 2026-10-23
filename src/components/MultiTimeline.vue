@@ -319,7 +319,7 @@ function outsideMenu(e){if(menu.value && !e.target.closest('.timeline-menu'))clo
 const keyProperty=ref('@x'),showKeyRows=ref(false)
 const visitedProperties=ref(['@x'])
 watch(keyProperty,key=>{if(!visitedProperties.value.includes(key))visitedProperties.value.push(key)},{flush:'sync'})
-const keyProperties=computed(()=>[...new Set(['@x','@y','@scale','@rotation','@opacity',...Object.keys(props.selected?.keyframes || {})])].sort((a,b)=>Number(b.startsWith('@'))-Number(a.startsWith('@'))))
+const keyProperties=computed(()=>[...new Set(['@x','@y','@scale','@scaleX','@scaleY','@rotation','@opacity',...Object.keys(props.selected?.keyframes || {})])].sort((a,b)=>Number(b.startsWith('@'))-Number(a.startsWith('@'))))
 const expandedProperties=computed(()=>keyProperties.value.filter(key=>visitedProperties.value.includes(key) || props.selected?.keyframes[key]?.length))
 const currentFrame=computed(()=>props.selected ? Math.round((props.time-props.selected.start+props.selected.offset)*props.fps) : -1)
 const propertyKeys=computed(()=>props.selected ? visibleClipKeys(props.selected,props.fps).filter(k=>k.key===keyProperty.value) : [])

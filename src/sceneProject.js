@@ -21,7 +21,7 @@ export function createClip(model, start = 0, duration = 5, track = 0) {
   return {
     id: uid(), model: model.category + '/' + model.name, entry: model.entry || 'model.json',
     name: model.name, layerName:model.name, layerLocked:false, layerHidden:false, layerSolo:false, track, start, duration, offset: 0,
-    transform: { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1 },
+    transform: { x: 0, y: 0, scale: 1, scaleX:1, scaleY:1, rotation: 0, opacity: 1 },
     mouseTrack: true, blendMode:'source-over', params: {}, keyframes: {}, events: [],
   }
 }
@@ -62,7 +62,7 @@ export function motionEventsAtTick(clip, previousFrame, frame, entering, fps) {
 }
 export function sampleClip(clip, time, fps, groups = []) {
   const frame = localFrame(clip, time, fps)
-  const params = { ...clip.params }, transform = { ...clip.transform }
+  const params = { ...clip.params }, transform = { scaleX:1,scaleY:1,...clip.transform }
   for (const [key, keys] of Object.entries(clip.keyframes)) {
     if (key.startsWith('@')) transform[key.slice(1)] = sampleTrack(keys, frame, transform[key.slice(1)])
     else params[key] = sampleTrack(keys, frame, params[key] ?? 0)
@@ -118,7 +118,7 @@ export function readProject(data, models) {
     clip.start = number(raw.start, 0, 0, project.duration - 1 / project.fps)
     clip.duration = number(raw.duration, project.duration - clip.start, 1 / project.fps, project.duration - clip.start)
     clip.offset = number(raw.offset, 0, 0, 600)
-    for (const [key, min, max] of [['x', -1920, 1920], ['y', -1080, 1080], ['scale', .1, 5], ['rotation', -180, 180], ['opacity', 0, 1]]) {
+    for (const [key, min, max] of [['x', -1920, 1920], ['y', -1080, 1080], ['scale', .1, 5], ['scaleX', .1, 5], ['scaleY', .1, 5], ['rotation', -180, 180], ['opacity', 0, 1]]) {
       clip.transform[key] = number(raw.transform?.[key], clip.transform[key], min, max)
     }
     for (const [key, value] of Object.entries(raw.params || {})) if (Number.isFinite(value)) clip.params[key] = value
@@ -161,7 +161,7 @@ export function readProject(data, models) {
       clip.layerLocked = raw.layerLocked === true
       clip.layerHidden = raw.layerHidden === true
       clip.layerSolo = raw.layerSolo === true
-      for (const [key, min, max] of [['x', -1920, 1920], ['y', -1080, 1080], ['scale', .1, 5], ['rotation', -180, 180], ['opacity', 0, 1]]) {
+      for (const [key, min, max] of [['x', -1920, 1920], ['y', -1080, 1080], ['scale', .1, 5], ['scaleX', .1, 5], ['scaleY', .1, 5], ['rotation', -180, 180], ['opacity', 0, 1]]) {
         clip.transform[key] = number(raw.transform?.[key], clip.transform[key], min, max)
         for (const k of Array.isArray(raw.keyframes?.['@'+key]) ? raw.keyframes['@'+key] : []) {
           if (!k || !Number.isFinite(k.frame) || k.frame < 0 || !Number.isFinite(k.value)) continue

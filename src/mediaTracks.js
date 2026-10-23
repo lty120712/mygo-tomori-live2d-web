@@ -31,7 +31,7 @@ export function createImageClip(asset, start = 0, duration = 5, track = 0) {
   return {
     id: uid('image'), assetId: asset.id, name: asset.name, track, start, duration, offset: 0,
     width: asset.width, height: asset.height,
-    transform: { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1 },
+    transform: { x: 0, y: 0, scale: 1, scaleX:1, scaleY:1, rotation: 0, opacity: 1 },
     keyframes: {}, params: {}, events: [], media: 'image', blendMode:'source-over',
     layerName: asset.name, layerLocked: false, layerHidden: false, layerSolo: false,
   }

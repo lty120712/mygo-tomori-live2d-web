@@ -64,7 +64,7 @@ export function rotateSelection(entries,center,degrees){
   return patches.every(e=>Math.abs(e.patch.x)<=1920 && Math.abs(e.patch.y)<=1080) ? patches : []
 }
 export function applyCanvasSelection(clips,entries,time,fps,autoKey){
-  const limits={x:[-1920,1920],y:[-1080,1080],scale:[.1,5],rotation:[-180,180]}
+  const limits={x:[-1920,1920],y:[-1080,1080],scale:[.1,5],scaleX:[.1,5],scaleY:[.1,5],rotation:[-180,180]}
   const targets=entries.map(e=>({...e,clip:clips.find(c=>c.id===e.id)}))
   if(!targets.length || targets.some(e=>!e.clip || e.clip.layerLocked || !clipVisible(e.clip,time) || Object.entries(e.patch).some(([key,value])=>!limits[key] || !Number.isFinite(value) || value<limits[key][0]-1e-7 || value>limits[key][1]+1e-7)))return false
   for(const {clip,patch} of targets)for(const [key,raw] of Object.entries(patch)){

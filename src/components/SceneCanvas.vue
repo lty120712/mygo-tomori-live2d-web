@@ -15,7 +15,7 @@
     <div class="scene-stage" ref="stage" tabindex="0" aria-label="画布编辑区域" @keydown="nudgeKey" @focusout="endNudge" :style="{ width: stageWidth + 'px', height:stageWidth*size.height/size.width+'px',transform:'translate('+viewPan.x+'px,'+viewPan.y+'px)' }" @pointermove="pointerMove" @pointerup="pointerUp" @pointercancel="pointerUp" @lostpointercapture="pointerUp">
       <canvas ref="canvas" :width="Math.round(size.width*renderScale)" :height="Math.round(size.height*renderScale)" aria-label="场景合成画布" @pointerdown="pointerDown"></canvas>
       <div v-if="selectionEntries.length>1" v-for="entry in selectionEntries" :key="entry.id" class="selection-outline member-outline" :style="poseBox(entry.pose)" aria-hidden="true"></div>
-      <div v-if="selectedBox" class="selection-outline" :style="selectedBox" :aria-label="'已选 '+selectionEntries.length+' 个图层'"><span>{{ selectionEntries.length>1 ? '已选 '+selectionEntries.length+' 个图层' : selected?.name }}</span><template v-if="!playing"><button v-for="corner in ['nw','ne','sw','se']" :key="corner" class="transform-handle scale-handle" :class="corner" :aria-label="'缩放图层 '+corner" :title="selectionEntries.length>1 ? '围绕选区中心整体缩放' : '拖动等比缩放，对角固定'" @pointerdown.stop.prevent="beginTransform($event,'scale',corner)"></button><i class="rotation-stem" aria-hidden="true"></i><button class="transform-handle rotate-handle" aria-label="旋转图层" title="拖动旋转；按住 Shift 吸附到 15°" @pointerdown.stop.prevent="beginTransform($event,'rotate')">↻</button></template></div>
+      <div v-if="selectedBox" class="selection-outline" :style="selectedBox" :aria-label="'已选 '+selectionEntries.length+' 个图层'"><span>{{ selectionEntries.length>1 ? '已选 '+selectionEntries.length+' 个图层' : selected?.name }}</span><template v-if="!playing"><button v-for="corner in ['nw','ne','sw','se']" :key="corner" class="transform-handle scale-handle" :class="corner" :aria-label="'缩放图层 '+corner" :title="selectionEntries.length>1 ? '围绕选区中心整体缩放' : '拖动等比缩放，对角固定'" @pointerdown.stop.prevent="beginTransform($event,'scale',corner)"></button><template v-if="selectionEntries.length===1"><button v-for="edge in ['n','s','e','w']" :key="edge" class="transform-handle axis-handle" :class="edge" :aria-label="'单轴缩放图层 '+edge" :title="edge==='e' || edge==='w' ? '只缩放 X，对侧固定' : '只缩放 Y，对侧固定'" @pointerdown.stop.prevent="beginTransform($event,edge==='e' || edge==='w' ? 'scaleX' : 'scaleY',edge)"></button></template><i class="rotation-stem" aria-hidden="true"></i><button class="transform-handle rotate-handle" aria-label="旋转图层" title="拖动旋转；按住 Shift 吸附到 15°" @pointerdown.stop.prevent="beginTransform($event,'rotate')">↻</button></template></div>
       <div v-if="marquee" class="canvas-marquee" :style="marquee" aria-hidden="true"></div>
       <div v-for="guide in guides" :key="guide.axis" class="canvas-guide" :class="guide.axis" :style="guide.axis==='x' ? {left:(guide.value+size.width/2)/size.width*100+'%'} : {top:(guide.value+size.height/2)/size.height*100+'%'}" aria-hidden="true"></div>
       <div v-if="!clips.length" class="empty-scene">从左侧素材库添加模型或图片到场景</div>
@@ -33,7 +33,8 @@ import { createVideoSources } from '../videoSources.js'
 import { assetStore } from '../assetStore.js'
 import {sceneDrawOrder,sceneHitOrder} from '../sceneLayers.js'
 import { clipVisible, sampleClip, sceneSize } from '../sceneProject.js'
-import { beginCanvasTransform,scaleCanvasTransform,rotateCanvasTransform } from '../canvasTransform.js'
+import { beginCanvasTransform,scaleCanvasTransform,scaleCanvasAxis,rotateCanvasTransform } from '../canvasTransform.js'
+import {scaleX,scaleY} from '../visualScale.js'
 import { snapCanvasPosition,nudgeCanvasPosition } from '../canvasPosition.js'
 import {selectionBounds,boxSelected,moveSelection,scaleSelection,rotateSelection,layoutSelection} from '../canvasSelection.js'
 import {isPanButton,panOffset} from '../canvasPan.js'
@@ -119,8 +120,8 @@ const editableClips=computed(()=>props.clips.filter(c=>!c.layerLocked && clipVis
 const selectionEntries=computed(()=>editableClips.value.filter(c=>(props.selectedIds || [props.selected?.id]).includes(c.id)).map(c=>({id:c.id,pose:pose(c)})))
 function poseBox(t){
   return {
-    left: ((size.value.width/2 + t.x - (t.width ?? 320)/2 * t.scale) / size.value.width * 100) + '%', top: ((size.value.height/2 + t.y - (t.height ?? 510)/2 * t.scale) / size.value.height * 100) + '%',
-    width: ((t.width ?? 320) * t.scale / size.value.width * 100) + '%', height: ((t.height ?? 510) * t.scale / size.value.height * 100) + '%',
+    left: ((size.value.width/2 + t.x - (t.width ?? 320)/2 * scaleX(t)) / size.value.width * 100) + '%', top: ((size.value.height/2 + t.y - (t.height ?? 510)/2 * scaleY(t)) / size.value.height * 100) + '%',
+    width: ((t.width ?? 320) * scaleX(t) / size.value.width * 100) + '%', height: ((t.height ?? 510) * scaleY(t) / size.value.height * 100) + '%',
     transform: 'rotate(' + t.rotation + 'deg)',
   }
 }
@@ -166,7 +167,7 @@ function pointerDown(e) {
   const hit = sorted.find(c => {
     const t = pose(c), r = -t.rotation * Math.PI / 180
     const x = p.x - t.x, y = p.y - t.y
-    return Math.abs(x * Math.cos(r) - y * Math.sin(r)) <= (t.width ?? 320)/2 * t.scale && Math.abs(x * Math.sin(r) + y * Math.cos(r)) <= (t.height ?? 510)/2 * t.scale
+    return Math.abs(x * Math.cos(r) - y * Math.sin(r)) <= (t.width ?? 320)/2 * scaleX(t) && Math.abs(x * Math.sin(r) + y * Math.cos(r)) <= (t.height ?? 510)/2 * scaleY(t)
   })
   const current=selectionEntries.value.map(e=>e.id)
   if (!hit){drag={mode:'box',point:p,last:p,base:e.shiftKey ? current : []};stage.value.setPointerCapture(e.pointerId);return}
@@ -204,7 +205,8 @@ function pointerMove(e) {
     }
     return
   }
-  if(drag.mode==='scale')emit('transform',drag.id,scaleCanvasTransform(drag,p))
+  if(drag.mode==='scaleX' || drag.mode==='scaleY')emit('transform',drag.id,scaleCanvasAxis(drag,p,drag.mode==='scaleX' ? 'x' : 'y'))
+  else if(drag.mode==='scale')emit('transform',drag.id,scaleCanvasTransform(drag,p))
   else if(drag.mode==='rotate')emit('transform',drag.id,rotateCanvasTransform(drag.pose,drag.point,p,e.shiftKey))
   else {
     const others=props.clips.filter(c=>!drag.entries.some(entry=>entry.id===c.id) && clipVisible(c,props.time)).map(pose)
@@ -252,7 +254,7 @@ function paint() {
       if(isTextClip(clip)){
         const t=pose(clip)
         ctx.save();ctx.translate(size.value.width/2+t.x,size.value.height/2+t.y)
-        ctx.rotate(t.rotation*Math.PI/180);ctx.scale(t.scale,t.scale)
+        ctx.rotate(t.rotation*Math.PI/180);ctx.scale(scaleX(t),scaleY(t))
         applyVisualComposite(ctx,clip,t.opacity);paintText(ctx,clip);ctx.restore()
         continue
       }
@@ -264,7 +266,7 @@ function paint() {
         if(source && videos.drawable(clip.assetId)) {
           const t=pose(clip),dimensions=mediaDimensions(clip)
           ctx.save();ctx.translate(size.value.width/2+t.x,size.value.height/2+t.y)
-          ctx.rotate(t.rotation*Math.PI/180);ctx.scale(t.scale,t.scale)
+          ctx.rotate(t.rotation*Math.PI/180);ctx.scale(scaleX(t),scaleY(t))
           applyVisualComposite(ctx,clip,t.opacity)
           ctx.drawImage(source,-dimensions.width/2,-dimensions.height/2,dimensions.width,dimensions.height);ctx.restore()
         }
@@ -275,7 +277,7 @@ function paint() {
         if(source){
           const t=pose(clip),dimensions=mediaDimensions(clip)
           ctx.save();ctx.translate(size.value.width/2+t.x,size.value.height/2+t.y)
-          ctx.rotate(t.rotation*Math.PI/180);ctx.scale(t.scale,t.scale)
+          ctx.rotate(t.rotation*Math.PI/180);ctx.scale(scaleX(t),scaleY(t))
           applyVisualComposite(ctx,clip,t.opacity)
           ctx.drawImage(source,-dimensions.width/2,-dimensions.height/2,dimensions.width,dimensions.height);ctx.restore()
         }
@@ -307,7 +309,7 @@ function paint() {
       ctx.save()
       ctx.translate(size.value.width/2 + t.x, size.value.height/2 + t.y)
       ctx.rotate(t.rotation * Math.PI / 180)
-      ctx.scale(t.scale, t.scale)
+      ctx.scale(scaleX(t),scaleY(t))
       applyVisualComposite(ctx,clip,t.opacity)
       ctx.drawImage(source, -480, -270, 960, 540)
       ctx.restore()
@@ -408,6 +410,7 @@ onBeforeUnmount(() => {images.destroy();videos.destroy();endPan();window.removeE
 .selection-outline { transform-origin:center; }
 .selection-outline .transform-handle { position:absolute; pointer-events:auto; touch-action:none; box-sizing:border-box; padding:0!important; background:var(--editor-panel)!important; border:1px solid var(--editor-focus)!important; color:var(--editor-accent)!important; width:12px; height:12px; border-radius:2px!important; z-index:1; }
 .scale-handle.nw { left:-6px; top:-6px; cursor:nwse-resize!important; }.scale-handle.ne { right:-6px; top:-6px; cursor:nesw-resize!important; }.scale-handle.sw { left:-6px; bottom:-6px; cursor:nesw-resize!important; }.scale-handle.se { right:-6px; bottom:-6px; cursor:nwse-resize!important; }
+.axis-handle.e,.axis-handle.w { top:calc(50% - 6px); cursor:ew-resize!important; }.axis-handle.e { right:-6px; }.axis-handle.w { left:-6px; }.axis-handle.n,.axis-handle.s { left:calc(50% - 6px); cursor:ns-resize!important; }.axis-handle.n { top:-6px; }.axis-handle.s { bottom:-6px; }
 .selection-outline .rotate-handle { top:10px; left:calc(50% - 10px); width:20px; height:20px; border-radius:50%!important; cursor:grab!important; line-height:18px; font-size:14px; }.rotation-stem { position:absolute; left:50%; top:0; height:10px; border-left:1px solid var(--editor-focus); }
 .empty-scene { position:absolute; inset:0; display:grid; place-items:center; pointer-events:none; color:white; text-shadow:0 1px 3px black; }
 .scene-preview { background:var(--editor-bg); }

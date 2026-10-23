@@ -12,13 +12,19 @@ import {applyTextPreset} from '../../src/textPresets.js'
 import {normalizeText,normalizeSpeaker,normalizeTextStyle} from '../../src/textTracks.js'
 import {createProject,readProject} from '../../src/sceneProject.js'
 import {createEditHistory} from '../../src/editHistory.js'
+import {resetCanvasPlacement} from '../../src/resetCanvasPlacement.js'
 createApp({setup(){
   const clip=ref(applyTextPreset(createTextClip(),'dialogue-dark')),notice=ref('隔离验证，不会保存到用户工程')
   const history=createEditHistory({capture:()=>({project:JSON.parse(JSON.stringify(clip.value))}),restore:s=>{clip.value=s.project}})
   function edit(patch){history.edit(()=>{if('text' in patch)clip.value.text=normalizeText(patch.text);if('speaker' in patch)clip.value.speaker=normalizeSpeaker(patch.speaker);if(patch.textStyle)clip.value.textStyle=normalizeTextStyle({...clip.value.textStyle,...patch.textStyle})})}
   function preset(id){history.end();history.edit(()=>{clip.value=applyTextPreset(createTextClip(),id)})}
+  function transform(patch){history.edit(()=>Object.assign(clip.value.transform,patch))}
   function roundTrip(){const p=createProject();p.imageClips=[JSON.parse(JSON.stringify(clip.value))];clip.value=readProject(JSON.parse(JSON.stringify(p)),[]).imageClips[0];notice.value='工程往返成功：'+clip.value.speaker+' / '+clip.value.textStyle.layout}
   return ()=>h('main',[h('header',[notice.value,' ',h('button',{onClick:()=>history.undo()},'撤销'),h('button',{onClick:()=>history.redo()},'重做'),h('button',{onClick:roundTrip},'工程往返验证')]),
-    h('div',{id:'workspace'},[h(AssetLibrary,{open:true,onAddText:preset}),h('section',{id:'preview'},[h(SceneCanvas,{clips:[clip.value],time:0,duration:5,fps:30,aspectRatio:'16:9',selected:clip.value,selectedIds:[],runtimes:{},background:'#7a8c9f',playing:false})]),h('aside',[h(TextInspector,{clip:clip.value,onEdit:edit,onBeginEdit:()=>history.begin(),onEndEdit:()=>history.end()})])])])
+    h('div',{id:'workspace'},[h(AssetLibrary,{open:true,onAddText:preset}),h('section',{id:'preview'},[h(SceneCanvas,{clips:[clip.value],time:0,duration:5,fps:30,aspectRatio:'16:9',selected:clip.value,selectedIds:[clip.value.id],runtimes:{},background:'#7a8c9f',playing:false,onTransform:(id,patch)=>transform(patch),onMove:(id,patch)=>transform(patch),onBeginEdit:()=>history.begin(),onEndEdit:()=>history.end()})]),h('aside',[
+      h('p','角点等比缩放；左右中点仅缩放 X，上下中点仅缩放 Y。'),
+      ...[['scale','等比缩放'],['scaleX','缩放 X'],['scaleY','缩放 Y'],['rotation','旋转']].map(([key,label])=>h('label',[label+(key==='rotation' ? ' °' : ' %'),h('input',{type:'number','aria-label':label,value:Math.round((clip.value.transform[key] ?? 1)*(key==='rotation' ? 1 : 100)),onFocus:()=>history.begin(),onBlur:()=>history.end(),onInput:e=>transform({[key]:Number(e.target.value)/(key==='rotation' ? 1 : 100)})})])),
+      h('button',{onClick:()=>history.edit(()=>resetCanvasPlacement(clip.value,0))},'重置位置和大小'),h('pre',{id:'transform-state'},JSON.stringify(clip.value.transform)),
+      h(TextInspector,{clip:clip.value,onEdit:edit,onBeginEdit:()=>history.begin(),onEndEdit:()=>history.end()})])])])
 }}).mount('#app')
 </script></html>

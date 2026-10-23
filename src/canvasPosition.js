@@ -1,9 +1,10 @@
 // Canvas coordinates are measured in output pixels, independent of preview zoom.
+import {scaleX,scaleY} from './visualScale.js'
 export function modelBounds(pose) {
   const angle=pose.rotation*Math.PI/180
-  const w=(pose.width ?? 320)/2,h=(pose.height ?? 510)/2
-  const halfWidth=(Math.abs(Math.cos(angle))*w+Math.abs(Math.sin(angle))*h)*pose.scale
-  const halfHeight=(Math.abs(Math.sin(angle))*w+Math.abs(Math.cos(angle))*h)*pose.scale
+  const w=(pose.width ?? 320)/2*scaleX(pose),h=(pose.height ?? 510)/2*scaleY(pose)
+  const halfWidth=Math.abs(Math.cos(angle))*w+Math.abs(Math.sin(angle))*h
+  const halfHeight=Math.abs(Math.sin(angle))*w+Math.abs(Math.cos(angle))*h
   return {x:[pose.x-halfWidth,pose.x,pose.x+halfWidth],y:[pose.y-halfHeight,pose.y,pose.y+halfHeight]}
 }
 export function snapCanvasPosition(pose,position,others=[],threshold=8,disabled=false,size={width:960,height:540}) {

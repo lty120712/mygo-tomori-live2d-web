@@ -1,4 +1,5 @@
 import { resolveParamId } from './params.js'
+import {scaleX,scaleY} from './visualScale.js'
 
 // Pointer coordinates are in the composite scene, then converted to each clip's local space.
 export function sceneMouseParams(clip, pointer, transform, groups) {
@@ -6,8 +7,8 @@ export function sceneMouseParams(clip, pointer, transform, groups) {
   pointer=following ? pointer : {x:transform.x,y:transform.y}
   const angle=-transform.rotation*Math.PI/180,dx=pointer.x-transform.x,dy=pointer.y-transform.y
   const clamp=n=>Math.max(-1,Math.min(1,n))
-  const x=clamp((dx*Math.cos(angle)-dy*Math.sin(angle))/(160*transform.scale))
-  const y=clamp(-(dx*Math.sin(angle)+dy*Math.cos(angle))/(255*transform.scale))
+  const x=clamp((dx*Math.cos(angle)-dy*Math.sin(angle))/(160*scaleX(transform)))
+  const y=clamp(-(dx*Math.sin(angle)+dy*Math.cos(angle))/(255*scaleY(transform)))
   const params=groups.flatMap(g=>g.params),result={}
   for(const [id,value] of [['ParamAngleX',x*15],['ParamAngleY',y*15],['ParamEyeBallX',x],['ParamEyeBallY',y]]) {
     const key=resolveParamId(id,groups),param=params.find(p=>p.key===key)

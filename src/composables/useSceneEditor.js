@@ -67,12 +67,12 @@ export function useSceneEditor() {
     return state
   }
   const selectedPose = computed(()=>selected.value ? sampleState(selected.value) : {params:{},transform:{}})
-  const paramLabels = computed(()=>Object.fromEntries([['@x','位置 X'],['@y','位置 Y'],['@scale','缩放'],['@rotation','旋转'],['@opacity','不透明度'],...(runtime.value?.groups || []).flatMap(g=>g.params.map(p=>[p.key,p.label]))]))
+  const paramLabels = computed(()=>Object.fromEntries([['@x','位置 X'],['@y','位置 Y'],['@scale','等比缩放'],['@scaleX','缩放 X'],['@scaleY','缩放 Y'],['@rotation','旋转'],['@opacity','不透明度'],...(runtime.value?.groups || []).flatMap(g=>g.params.map(p=>[p.key,p.label]))]))
   const visibleParams = computed(()=> {
     const query=paramSearch.value.trim().toLowerCase()
     return (runtime.value?.groups || []).flatMap(g=>g.params).filter(p=>query ? (p.label+' '+p.key).toLowerCase().includes(query) : allParams.value || p.common)
   })
-  const transformFields = [{key:'x',label:'位置 X',min:-1920,max:1920,step:1},{key:'y',label:'位置 Y',min:-1080,max:1080,step:1},{key:'scale',label:'缩放',min:.1,max:5,step:.01},{key:'rotation',label:'旋转',min:-180,max:180,step:1},{key:'opacity',label:'不透明度',min:0,max:1,step:.01}]
+  const transformFields = [{key:'x',label:'位置 X',min:-1920,max:1920,step:1},{key:'y',label:'位置 Y',min:-1080,max:1080,step:1},{key:'scale',label:'等比缩放',min:.1,max:5,step:.01},{key:'scaleX',label:'缩放 X',min:.1,max:5,step:.01},{key:'scaleY',label:'缩放 Y',min:.1,max:5,step:.01},{key:'rotation',label:'旋转',min:-180,max:180,step:1},{key:'opacity',label:'不透明度',min:0,max:1,step:.01}]
   const snapshot = value => JSON.parse(JSON.stringify(value))
   const historyRevision = ref(0)
   const history = createEditHistory({
