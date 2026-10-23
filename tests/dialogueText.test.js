@@ -14,7 +14,7 @@ test('对白预设在横竖画布内保持边距，独立复制样式且普通�
     assert.ok(clip.transform.y+box.height/2<=canvas.height/2-24+1e-8)
     const other=applyTextPreset(createTextClip(),'dialogue-dark',canvas)
     clip.textStyle.boxOpacity=.1;assert.equal(other.textStyle.boxOpacity,.68)
-    assert.equal(TEXT_PRESETS[1].style.boxOpacity,.68)
+    assert.equal(TEXT_PRESETS.find(p=>p.id==='dialogue-dark').style.boxOpacity,.68)
   }
   assert.equal(applyTextPreset(createTextClip(),'basic').textStyle.layout,'plain')
   assert.equal(applyTextPreset(createTextClip(),'basic').transform.y,0)

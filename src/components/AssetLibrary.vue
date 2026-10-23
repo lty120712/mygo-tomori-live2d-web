@@ -30,6 +30,7 @@
 
       <template v-else-if="activeTab==='text'">
         <div class="library-results text-presets">
+          <div class="text-batch-actions"><button :disabled="disabled" @click="emit('batch-text','srt')">导入 SRT</button><button :disabled="disabled" @click="emit('batch-text','lines')">批量文字</button></div>
           <p class="media-hint">选中文字轨道时追加到末尾，否则添加到播放头。</p>
           <button v-for="preset in TEXT_PRESETS" :key="preset.id" class="text-preset" :disabled="disabled" :aria-label="'添加'+preset.name" @click="emit('add-text',preset.id)">
             <span v-if="preset.style.layout==='dialogue'" class="text-preset-preview dialogue-preview" :style="{background:preset.style.boxColor || '#302b38',color:preset.style.color || '#ffffff',borderRadius:(preset.style.boxRadius || 0)+'px'}"><b :style="{color:preset.style.speakerColor}">{{preset.speaker}}</b><i></i><span>{{preset.text}}</span></span>
@@ -72,7 +73,7 @@ import { describeModel, filterModelLibrary } from '../modelLibrary.js'
 import { assetStore } from '../assetStore.js'
 import { TEXT_PRESETS } from '../textPresets.js'
 const props = defineProps({ models: { type: Array, default: () => [] }, clips: { type: Array, default: () => [] }, audioClips: { type: Array, default: () => [] }, backgroundClips: { type: Array, default: () => [] }, open: Boolean, disabled: Boolean })
-const emit = defineEmits(['toggle', 'add', 'add-image', 'background-image', 'add-audio', 'add-video', 'add-text'])
+const emit = defineEmits(['toggle', 'add', 'add-image', 'background-image', 'add-audio', 'add-video', 'add-text', 'batch-text'])
 const referenced = asset => [...props.clips, ...props.backgroundClips, ...props.audioClips].some(c => c.assetId === asset.id)
 const activeTab = ref('model')
 const assets = ref([])
@@ -121,6 +122,7 @@ onMounted(() => { refreshAssets(); window.addEventListener('tomori-assets-change
 onBeforeUnmount(() => window.removeEventListener('tomori-assets-changed', refreshAssets))
 </script>
 <style scoped>
+.text-batch-actions { display:flex; gap:8px; }.text-batch-actions button { flex:1; min-width:0; padding:8px; border:1px solid var(--editor-border); border-radius:8px; color:var(--editor-accent); background:var(--editor-accent-soft); font-size:12px; }
 .asset-tabs { flex-wrap:wrap; }.asset-tabs button { min-width:65px; }
 .text-presets { padding:12px 16px; }.text-preset { position:relative; display:flex; flex-direction:column; gap:9px; width:100%; padding:14px; border:1px solid var(--editor-border); border-radius:12px; background:var(--editor-soft); color:var(--editor-text); text-align:left; }
 .text-preset-preview { display:grid; place-items:center; width:100%; height:80px; background:var(--editor-panel); border-radius:8px; font-size:28px; }.text-preset small { color:var(--editor-muted); line-height:1.5; }.text-preset .add-mark { position:absolute; right:14px; bottom:12px; }

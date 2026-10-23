@@ -1,0 +1,30 @@
+<!doctype html><html lang="zh-CN"><meta charset="UTF-8"><title>字幕导入隔离验证</title>
+<style>:root {font:13px system-ui,sans-serif;--editor-panel:#fff;--editor-soft:#f6f3f5;--editor-text:#342e35;--editor-muted:#817580;--editor-accent:#743a52;--editor-border:#ded5dc;--editor-focus:#ac7991;--editor-accent-soft:#f3e4eb;--editor-hover:#f6eaf0;--editor-radius:6px}body{margin:12px;color:#342e35;background:#f6f3f5}header{display:flex;gap:10px;align-items:center}button{cursor:pointer}pre{white-space:pre-wrap;max-height:100px;overflow:auto;font-size:11px}#preview{height:290px;display:flex;flex-direction:column;background:#7a8c9f}.multi-timeline button{border:1px solid #ddd;border-radius:5px;background:#fff;padding:4px 6px}</style>
+<div id="app"></div><script type="module">
+import {createApp,h,ref,computed} from 'vue'
+import TextBatchDialog from '../../src/components/TextBatchDialog.vue'
+import MultiTimeline from '../../src/components/MultiTimeline.vue'
+import SceneCanvas from '../../src/components/SceneCanvas.vue'
+import {createProject,readProject,sampleClip} from '../../src/sceneProject.js'
+import {createTextClip} from '../../src/mediaTracks.js'
+import {applyTextPreset} from '../../src/textPresets.js'
+import {planTextBatch,buildTextBatch} from '../../src/subtitleImport.js'
+import {createEditHistory} from '../../src/editHistory.js'
+createApp({setup(){
+  const p=ref(createProject()),open=ref(false),mode=ref('srt'),time=ref(0),selectedId=ref(''),notice=ref('隔离验证，不读写用户工程')
+  p.value.duration=6
+  const source=applyTextPreset(createTextClip(0,2,0),'dialogue-light');source.text='保留原字幕';source.speaker='高松灯';p.value.imageClips=[source];selectedId.value=source.id
+  const selected=computed(()=>p.value.imageClips.find(c=>c.id===selectedId.value) || p.value.imageClips[0])
+  const history=createEditHistory({capture:()=>({project:JSON.parse(JSON.stringify(p.value)),selectedId:selectedId.value,time:time.value}),restore:s=>{p.value=s.project;selectedId.value=s.selectedId;time.value=s.time}})
+  function show(value){mode.value=value;open.value=true}
+  function apply(request){const plan=planTextBatch(p.value.imageClips,request.cues,{duration:p.value.duration,fps:30,selectedTrack:selected.value?.track});if(plan.error){notice.value=plan.error;return}
+    const clips=buildTextBatch(plan,{presetId:request.presetId,template:request.presetId==='current' ? selected.value : null})
+    history.edit(()=>{for(const c of p.value.imageClips)c.track+=plan.shift;p.value.imageClips.push(...clips);p.value.duration=plan.projectDuration;selectedId.value=clips[0].id;time.value=clips[0].start});open.value=false;notice.value='已添加 '+clips.length+' 条文字'
+  }
+  return ()=>h('main',[h('header',[h('span',notice.value),h('button',{onClick:()=>show('srt')},'导入 SRT'),h('button',{onClick:()=>show('lines')},'批量文字'),h('button',{onClick:()=>history.undo()},'撤销'),h('button',{onClick:()=>history.redo()},'重做'),h('button',{onClick:()=>{p.value=readProject(JSON.parse(JSON.stringify(p.value)),[]);notice.value='工程往返成功'}},'工程往返验证')]),
+    h('pre',{id:'result'},JSON.stringify({duration:p.value.duration,clips:p.value.imageClips.map(c=>({text:c.text,start:c.start,duration:c.duration,track:c.track,speaker:c.speaker}))})),
+    h('section',{id:'preview'},[h(SceneCanvas,{clips:p.value.imageClips,background:'#7a8c9f',time:time.value,duration:p.value.duration,fps:30,aspectRatio:'16:9',runtimes:{},selectedIds:[]})]),
+    h(MultiTimeline,{clips:p.value.imageClips,selectedIds:[selectedId.value],selectedId:selectedId.value,selected:selected.value,duration:p.value.duration,fps:30,time:time.value,labels:{},pose:selected.value ? sampleClip(selected.value,time.value,30) : {},runtimes:{},transformFields:[],onSelect:id=>{selectedId.value=id},onSeek:v=>{time.value=v},onBatchText:()=>show('srt')}),
+    open.value ? h(TextBatchDialog,{clips:p.value.imageClips,selected:selected.value,time:time.value,duration:p.value.duration,fps:30,initialMode:mode.value,onCancel:()=>{open.value=false},onApply:apply}) : null])
+}}).mount('#app')
+</script></html>
