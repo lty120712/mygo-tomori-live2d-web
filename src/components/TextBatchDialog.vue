@@ -14,7 +14,7 @@
           <div class="settings-grid"><label>开始时间<TimecodeInput label="批量文字开始时间" :value="lineStart" :fps="fps" :max="600" @change="lineStart=$event" /></label><label>每条时长（秒）<input aria-label="每条文字时长" type="number" :min="1/fps" max="600" step="0.1" v-model.number="lineDuration" /></label></div>
           <p class="hint">默认接在选中文字轨道末尾；未选中文字轨时从播放头开始。空行会忽略，时长按 {{fps}} FPS 对齐，最短一帧。</p>
         </template>
-        <label>文字样式<select aria-label="字幕文字样式" v-model="presetId"><option v-if="isTextClip(selected)" value="current">沿用所选文字（含说话人和位置）</option><option v-for="preset in TEXT_PRESETS" :key="preset.id" :value="preset.id">{{preset.name}}</option></select></label>
+        <label>文字样式<select aria-label="字幕文字样式" v-model="presetId"><option v-if="isTextClip(selected)" value="current">沿用所选文字（含说话人和位置）</option><option v-for="preset in [...TEXT_PRESETS,...customPresets]" :key="preset.id" :value="preset.id">{{preset.name}}</option></select></label>
       </fieldset>
       <p v-if="fileError || (hasInput && plan.error)" class="import-error" role="alert">{{fileError || plan.error}}</p>
       <section v-if="!plan.error" class="import-preview" aria-label="字幕导入预览">
@@ -34,7 +34,7 @@ import {TEXT_PRESETS} from '../textPresets.js'
 import {isTextClip} from '../textTracks.js'
 import {parseSrt,decodeSubtitleFile,linesToCues,planTextBatch,batchTextStart} from '../subtitleImport.js'
 import {formatTimecode} from '../timecode.js'
-const props=defineProps({clips:Array,selected:Object,time:Number,duration:Number,fps:Number,disabled:Boolean,initialMode:{type:String,default:'srt'}})
+const props=defineProps({clips:Array,selected:Object,time:Number,duration:Number,fps:Number,disabled:Boolean,customPresets:{type:Array,default:()=>[]},initialMode:{type:String,default:'srt'}})
 const emit=defineEmits(['cancel','apply'])
 const dialog=ref(null),fileInput=ref(null),mode=ref(props.initialMode==='lines' ? 'lines' : 'srt'),srt=ref(''),lines=ref(''),lineStart=ref(batchTextStart(props.clips,props.time,props.selected?.track)),lineDuration=ref(3)
 const presetId=ref(isTextClip(props.selected) ? 'current' : 'subtitle'),reading=ref(false),fileError=ref(''),fileName=ref('')

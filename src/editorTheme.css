@@ -1,26 +1,26 @@
 .scene-editor,.timeline-menu,.key-marquee,.curve-editor,.text-batch-dialog {
-  --editor-bg:#e9e3e1;
-  --editor-panel:#f8f5f2;
-  --editor-soft:#eee8e7;
-  --editor-hover:#e6dcdf;
-  --editor-border:#dcd2d5;
-  --editor-text:#342c30;
-  --editor-muted:#786870;
-  --editor-accent:#743a52;
-  --editor-accent-soft:#eadde3;
-  --editor-focus:#a76581;
-  --editor-key:#805e18;
-  --editor-param:#386d77;
-  --editor-clip:#e6dbe1;
-  --editor-clip-selected:#d6bbc9;
-  --editor-motion:#e1daec;
-  --editor-guide:#b37a22;
-  --editor-radius:9px;
-  color-scheme:light;
+  --editor-bg:#17171c;
+  --editor-panel:#24242c;
+  --editor-soft:#1c1c23;
+  --editor-hover:#32323e;
+  --editor-border:#373740;
+  --editor-text:#e3e1e8;
+  --editor-muted:#a6a1af;
+  --editor-accent:#e38aa8;
+  --editor-accent-soft:#412c3a;
+  --editor-focus:#efabc2;
+  --editor-key:#dbb970;
+  --editor-param:#81bfb6;
+  --editor-clip:#41394d;
+  --editor-clip-selected:#5b4257;
+  --editor-motion:#4a3d55;
+  --editor-guide:#d7b771;
+  --editor-radius:5px;
+  color-scheme:dark;
 }
 .scene-editor,.timeline-menu { font-family:'Segoe UI','Microsoft YaHei',sans-serif; }
-.scene-editor *,.timeline-menu { scrollbar-width:thin; scrollbar-color:#c5b6bd transparent; }
-.scene-editor ::selection,.timeline-menu ::selection { background:#d9bcc9; color:#342c30; }
+.scene-editor *,.timeline-menu { scrollbar-width:thin; scrollbar-color:#56515f transparent; }
+.scene-editor ::selection,.timeline-menu ::selection { background:#76445c; color:#fff; }
 .scene-editor input[type=checkbox],.scene-editor input[type=range] { accent-color:var(--editor-accent); }
 .scene-editor input:not([type=checkbox]):not([type=range]):not([type=color]),.scene-editor select {
   background:var(--editor-soft); color:var(--editor-text); border:1px solid transparent; border-radius:7px; padding:6px; font:inherit; box-sizing:border-box;

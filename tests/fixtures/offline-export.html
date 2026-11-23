@@ -1,0 +1,31 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>逐帧导出综合验证</title>
+<style>:root{font:14px system-ui;--editor-panel:#fff;--editor-soft:#f4edf1;--editor-text:#342e35;--editor-muted:#716371;--editor-border:#d5c7d1;--editor-accent:#925c81}body{margin:24px;background:#f8f4f6;color:var(--editor-text)}main{max-width:1000px;margin:auto}button{padding:8px 16px;margin:8px;cursor:pointer}.preview{height:450px;display:flex}pre{padding:12px;background:#fff;white-space:pre-wrap}</style><div id="app">准备隔离样例…</div><script type="module">
+import {createApp,h,ref} from 'vue'
+import models from 'virtual:model-manifest'
+import {useSceneEditor} from '../../src/composables/useSceneEditor.js'
+import {createLocalStore,memoryDocumentBackend,SCENE_KEY} from '../../src/localStore.js'
+import {createAssetStore,memoryBackend} from '../../src/assetStore.js'
+import {createProject,createClip} from '../../src/sceneProject.js'
+import {createTextClip,createVideoClip,createAudioClip,createColorBackgroundClip} from '../../src/mediaTracks.js'
+import {wavHeader,pcm16} from '../../src/offlineAudio.js'
+import SceneCanvas from '../../src/components/SceneCanvas.vue'
+import VideoExportDialog from '../../src/components/VideoExportDialog.vue'
+import VideoExportStatus from '../../src/components/VideoExportStatus.vue'
+const assets=createAssetStore(memoryBackend()),store=createLocalStore(memoryDocumentBackend())
+const samples=new Float32Array(48000*4);for(let i=0;i<samples.length;i++)samples[i]=.3*Math.sin(i*2*Math.PI*440/48000)
+const audio=await assets.importFile(new File([wavHeader(samples.length),pcm16({length:samples.length,numberOfChannels:1,getChannelData:()=>samples})],'测试音.wav',{type:'audio/wav'}))
+const source=document.createElement('canvas');source.width=240;source.height=120;const ctx=source.getContext('2d'),parts=[],stream=source.captureStream(15),input=new MediaRecorder(stream,{mimeType:'video/webm'}),done=new Promise(resolve=>{input.ondataavailable=e=>parts.push(e.data);input.onstop=resolve})
+let counter=0;function draw(){ctx.fillStyle=['#e33','#3b5','#36e','#ed4'][counter++%4];ctx.fillRect(0,0,240,120);ctx.fillStyle='white';ctx.font='40px sans-serif';ctx.fillText(String(counter),90,80)}draw();input.start();const timer=setInterval(draw,200);await new Promise(resolve=>setTimeout(resolve,2000));clearInterval(timer);input.stop();await done;stream.getTracks().forEach(t=>t.stop())
+const video=await assets.importFile(new File(parts,'变化色块.webm',{type:'video/webm'})),p=createProject()
+p.duration=4;p.background='#345'
+const model=models.find(m=>m.id?.includes('tomori') && m.id?.includes('live_default')) || models[0],character=createClip(model,0,4,3);character.mouseTrack=false;character.transform.scale=.6
+const text=createTextClip(0,4,0);text.text='逐帧导出 · 模型／视频／音频';text.transform.y=180;text.textStyle.fontSize=26
+const a=createVideoClip(video,0,1.5,1),b=createVideoClip(video,0,1.5,2);a.transform.x=-280;b.transform.x=280;b.offset=.5
+const sound=createAudioClip(audio,.5,2,0);sound.offset=.25;sound.volume=.5;sound.fadeIn=.25;sound.fadeOut=.25
+p.clips=[character];p.imageClips=[text,a,b];p.audioClips=[sound];p.backgroundClips=[createColorBackgroundClip('#325f54',0,2),createColorBackgroundClip('#674052',2,2)]
+await store.set(SCENE_KEY,p)
+createApp({setup(){const e=useSceneEditor({store,assets}),dialog=ref(null)
+function motion(){const clip=e.project.clips[0],r=e.runtimes[clip.id],name=Object.keys(r.info).find(key=>r.info[key].seconds>1);if(name)clip.events=[{id:'fixture-motion',type:'motion',name,frame:0,duration:Math.min(4,r.info[name].seconds),sourceDuration:r.info[name].seconds,offset:0}]}
+function modern(){const next=createClip(models.find(m=>m.category==='tomori' && m.name==='adv_live2d_tomori_001_casual_spring_01'),0,4,3);next.mouseTrack=false;next.transform.scale=.6;e.project.clips=[next]}
+return()=>h('main',[h('h2','逐帧导出 · 综合回归'),h('p','仅使用内存素材和内置模型，不修改用户工程。两个视频片段引用同一素材的不同源入点；测试音从 0.5 秒进入。'),h('button',{disabled:e.locked.value || e.loading.value,onClick:()=>dialog.value.open()},'导出视频'),h('button',{disabled:e.locked.value,onClick:modern},'切换现代模型'),h('button',{disabled:e.locked.value || !e.runtimes[e.project.clips[0]?.id]?.infoReady,onClick:motion},'加入模型动作'),h(VideoExportDialog,{ref:dialog,recorder:e.recorder,aspectRatio:e.project.aspectRatio,fps:e.project.fps,duration:e.project.duration,disabled:e.locked.value,onStart:e.record}),h(VideoExportStatus,{recorder:e.recorder,time:e.time.value,duration:e.project.duration,onCancel:e.cancelExport,onFinish:e.record}),h('div',{class:'preview'},[h(SceneCanvas,{clips:e.allClips.value,backgroundClips:e.project.backgroundClips,assetProvider:assets,background:e.project.background,time:e.time.value,duration:e.project.duration,fps:e.project.fps,aspectRatio:e.project.aspectRatio,playing:e.playing.value,recording:e.recorder.isRecording.value,runtimes:e.runtimes,ref:e.sceneCanvas,onReady:e.runtimeReady,onDispose:e.disposeRuntime,onError:e.runtimeError})]),h('pre',JSON.stringify({loading:e.loading.value,playing:e.playing.value,processing:e.recorder.isExporting.value,time:e.time.value,method:e.recorder.method.value,phase:e.recorder.phase.value,events:e.project.clips[0]?.events,message:e.message.value,error:e.recorder.error.value},null,2))])}}).mount('#app')
+</script></html>

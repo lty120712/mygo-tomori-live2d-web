@@ -2,6 +2,8 @@ import { uid, clipVisible, splitClip } from './sceneProject.js'
 import { audioGainAt, normalizeVolumeKeyframes, splitVolumeKeyframes, volumeAutomationPoints } from './audioVolume.js'
 import { normalizeAudioFilter } from './audioFilters.js'
 import { isTextClip, TEXT_CLIP_LIMIT, normalizeTextStyle, layoutText } from './textTracks.js'
+import {normalizeMediaCrop} from './mediaCrop.js'
+import {applyMediaMask,normalizeMediaMask} from './mediaMask.js'
 export { isTextClip } from './textTracks.js'
 
 export { audioGainAt, normalizeVolumeKeyframes } from './audioVolume.js'
@@ -51,7 +53,8 @@ export function mediaDimensions(clip) {
   if(isTextClip(clip)){const {width,height}=layoutText(clip);return {width,height}}
   const width = clip.width > 0 ? clip.width : 320, height = clip.height > 0 ? clip.height : 180
   const ratio = Math.min(1, 960 / width, 540 / height)
-  return { width: width * ratio, height: height * ratio }
+  const crop=normalizeMediaCrop(clip.crop)
+  return { width: width * ratio*crop.width, height: height * ratio*crop.height }
 }
 export const imageDimensions = mediaDimensions
 export function visualPose(clip, transform) {
@@ -74,8 +77,9 @@ export function createImageBackgroundClip(asset, start = 0, duration = 5) {
 export function backgroundAtTime(clips, { color, image } = {}, time = 0) {
   // 隐藏的背景轨道按「没有片段覆盖」处理，继续回退旧背景图与兜底色。
   const clip = (clips || []).find(c => !c.layerHidden && time >= c.start - 1e-9 && time < c.start + c.duration - 1e-9)
-  if (clip?.kind === 'image' && clip.assetId) return { kind: 'image', assetId: clip.assetId, name: clip.name }
-  if (clip?.kind === 'color') return { kind: 'color', color: clip.color }
+  const mask=clip?.mask ? {mask:clip.mask} : {}
+  if (clip?.kind === 'image' && clip.assetId) return { kind: 'image', assetId: clip.assetId, name: clip.name,...mask }
+  if (clip?.kind === 'color') return { kind: 'color', color: clip.color,...mask }
   if (image) return { kind: 'legacy-image', image }
   return { kind: 'color', color }
 }
@@ -128,12 +132,14 @@ export function backgroundClipTemplate(clip) {
   const look = clip.kind === 'color'
     ? { kind: 'color', color: clip.color }
     : { kind: 'image', assetId: clip.assetId, name: clip.name }
-  return { ...look, duration: clip.duration }
+  return { ...look, duration: clip.duration,...(clip.mask ? {mask:normalizeMediaMask(clip.mask)} : {}) }
 }
 export function createClipFromTemplate(template, start = 0, duration = template.duration || 5) {
-  return template.kind === 'color'
+  const clip=template.kind === 'color'
     ? createColorBackgroundClip(template.color, start, duration)
     : createImageBackgroundClip({ id: template.assetId, name: template.name }, start, duration)
+  if(template.mask)clip.mask=normalizeMediaMask(template.mask)
+  return clip
 }
 /**
  * 把 legacy base64 背景图迁入素材库改写成背景片段并清空旧字段。
@@ -148,7 +154,16 @@ export function migrateLegacyBackground(project, asset, extra = null) {
   return clips
 }
 /** 背景绘制：图片拉伸铺满；素材缺失时回退纯色，保证画面不透明。 */
-export function paintBackground(ctx, background, { width, height, bitmap, legacyImage, fallback }) {
+export function paintBackground(ctx, background, { width, height, bitmap, legacyImage, fallback,baseBackground }) {
+  if(normalizeMediaMask(background?.mask).type!=='none'){
+    const options={width,height,bitmap,legacyImage,fallback}
+    paintBackground(ctx,{kind:'color',color:fallback},options)
+    paintBackground(ctx,baseBackground || {kind:'color',color:fallback},options)
+    if(background.kind==='image' && !bitmap)return 'fallback'
+    ctx.save();ctx.translate(width/2,height/2);applyMediaMask(ctx,background.mask,{width,height});ctx.translate(-width/2,-height/2)
+    const result=paintBackground(ctx,{...background,mask:null},options)
+    ctx.restore();return result
+  }
   if (background?.kind === 'image' && bitmap) { ctx.drawImage(bitmap, 0, 0, width, height); return 'image' }
   if (background?.kind === 'legacy-image' && legacyImage) { ctx.drawImage(legacyImage, 0, 0, width, height); return 'legacy-image' }
   const color = background?.kind === 'color' && background.color ? background.color : fallback

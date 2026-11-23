@@ -10,7 +10,7 @@ export function createImageSources({ blob, decode = createImageBitmap, changed =
       if (entries.has(id)) continue
       const entry = { status: 'loading', source: null }
       entries.set(id, entry)
-      Promise.resolve().then(() => blob(id)).then(file => {
+      entry.pending=Promise.resolve().then(() => blob(id)).then(file => {
         if (!file) throw new Error('素材缺失')
         return decode(file)
       }).then(source => {
@@ -26,6 +26,7 @@ export function createImageSources({ blob, decode = createImageBitmap, changed =
     sync,
     get: id => entries.get(id)?.source,
     status: id => entries.get(id)?.status,
+    ready: () => Promise.all([...entries.values()].map(entry=>entry.pending)),
     destroy() { for (const [id, entry] of entries) release(id, entry) },
   }
 }

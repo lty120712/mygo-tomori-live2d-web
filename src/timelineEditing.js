@@ -1,5 +1,5 @@
 // Snap in screen pixels so precision remains predictable at every zoom level.
-export function editTimelineClip(drag, delta, { duration, fps, targets = [], tolerance = 0 }) {
+export function editTimelineClip(drag, delta, { duration, fps, targets = [], tolerance = 0, neighbors = [] }) {
   const frame = 1 / fps, round = value => Math.round(value * fps) / fps
   const end = drag.start + drag.duration
   let value, low, high, edges
@@ -9,10 +9,15 @@ export function editTimelineClip(drag, delta, { duration, fps, targets = [], tol
     edges = [0, drag.duration]
   } else if (drag.mode === 'right') {
     low = drag.start + frame; high = duration
+    for(const clip of neighbors)if(clip.start>=end-1e-8)high=Math.min(high,Math.floor((clip.start+1e-8)*fps)/fps)
     value = Math.max(low, Math.min(high, round(end + delta)))
     edges = [0]
   } else {
     low = Math.max(0, drag.start - drag.offset); high = end - frame
+    for(const clip of neighbors){
+      const edge=clip.start+clip.duration
+      if(edge<=drag.start+1e-8)low=Math.max(low,Math.ceil((edge-1e-8)*fps)/fps)
+    }
     value = Math.max(low, Math.min(high, round(drag.start + delta)))
     edges = [0]
   }
@@ -30,6 +35,12 @@ export function editTimelineClip(drag, delta, { duration, fps, targets = [], tol
     : drag.mode === 'right' ? { duration: snapped - drag.start }
     : { start: snapped, duration: end - snapped, offset: drag.offset + snapped - drag.start }
   return { patch, snapTime }
+}
+
+// 标记和播放头是单个时间点，复用片段边界的帧对齐与屏幕像素吸附规则。
+export function snapTimelinePoint(time, options) {
+  const {patch,snapTime}=editTimelineClip({mode:'move',start:time,duration:0,offset:0},0,options)
+  return {time:patch.start,snapTime}
 }
 
 export function timelineTicks(duration, width) {

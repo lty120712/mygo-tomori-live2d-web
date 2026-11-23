@@ -1,5 +1,5 @@
 // History contains editor data only; renderer instances and playback stay outside it.
-export function createEditHistory({ capture, restore, changed = () => {}, limit = 100, now = Date.now }) {
+export function createEditHistory({ capture, restore, finalize = () => {}, changed = () => {}, limit = 100, now = Date.now }) {
   const undoStack = [], redoStack = []
   let gesture = null
   const equal = (a, b) => JSON.stringify([a.project, a.overrides]) === JSON.stringify([b.project, b.overrides])
@@ -17,16 +17,19 @@ export function createEditHistory({ capture, restore, changed = () => {}, limit 
   function end() {
     if (!gesture) return
     const before = gesture; gesture = null
+    finalize()
     commit(before, capture())
   }
   return {
     get canUndo() { return undoStack.length > 0 || !!(gesture && !equal(gesture,capture())) },
     get canRedo() { return redoStack.length > 0 && !(gesture && !equal(gesture,capture())) },
-    begin() { end(); gesture = capture() },
+    // A pointer press may also focus the control. Both events belong to the same gesture.
+    begin() { if(!gesture)gesture = capture() },
     end,
     edit(fn, key) {
       if (gesture) { const result = fn(); changed(); return result }
       const before = capture(), result = fn()
+      finalize()
       commit(before, capture(), key)
       return result
     },

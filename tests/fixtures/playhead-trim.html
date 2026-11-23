@@ -1,0 +1,45 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>播放头修剪回归</title>
+<style>:root{font:14px system-ui;--editor-panel:#f8f5f2;--editor-soft:#eee8e7;--editor-text:#342c30;--editor-muted:#786870;--editor-border:#dcd2d5;--editor-accent:#743a52;--editor-focus:#a76581;--editor-key:#805e18}body{margin:20px;background:#f8f4f6;color:#342c30}main{max-width:1100px;margin:auto}header{display:flex;gap:8px;align-items:center;flex-wrap:wrap}button{padding:6px;cursor:pointer}.area{margin-top:12px}.multi-timeline{height:420px!important}pre{background:white;padding:10px;max-height:170px;overflow:auto}</style>
+<div id="app"></div><script type="module">
+import {createApp,h} from 'vue'
+import {useSceneEditor} from '../../src/composables/useSceneEditor.js'
+import {createLocalStore,memoryDocumentBackend,SCENE_KEY} from '../../src/localStore.js'
+import {createAssetStore,memoryBackend} from '../../src/assetStore.js'
+import {createProject,createClip,setClipKeyframe,sampleClip} from '../../src/sceneProject.js'
+import {createTextClip,createImageClip,createVideoClip,createColorBackgroundClip,createAudioClip} from '../../src/mediaTracks.js'
+import models from 'virtual:model-manifest'
+import MultiTimeline from '../../src/components/MultiTimeline.vue'
+import '../../src/editorTheme.css'
+const store=createLocalStore(memoryDocumentBackend()),project=createProject(),asset={id:'trim-fixture-image',name:'图片',width:320,height:180}
+project.duration=20;project.clips=[createClip(models[0],2,8,0)]
+project.imageClips=[createImageClip(asset,2,8,1),createVideoClip({...asset,id:'trim-fixture-video',name:'视频'},2,8,2),createTextClip(2,8,3),createTextClip(12,3,3)]
+project.imageClips.at(-1).name='后续文字';project.imageClips.at(-1).text='保持十二秒开始'
+for(const clip of [...project.clips,...project.imageClips]){clip.offset=1;setClipKeyframe(clip,'@x',0,0);setClipKeyframe(clip,'@x',300,100)}
+setClipKeyframe(project.clips[0],'@y',90,20)
+project.backgroundClips=[createColorBackgroundClip('#d0b2de',2,8),createColorBackgroundClip('#efe5ec',19,1)]
+project.audioClips=[createAudioClip({id:'trim-fixture-audio',name:'音频'},2,8)];project.audioClips[0].offset=3
+await store.set(SCENE_KEY,project)
+createApp({setup(){
+  const e=useSceneEditor({store,assets:createAssetStore(memoryBackend())})
+  const state=clip=>({name:clip.name,start:clip.start,duration:clip.duration,offset:clip.offset ?? null,...(clip.keyframes ? {x:sampleClip(clip,e.time.value,e.project.fps).transform.x} : {})})
+  return()=>h('main',[
+    h('h2','片段修剪与整组对齐回归'),h('p','隔离内存工程，不加载画布和媒体。片段初始为 2–10 秒，后续文字初始从 12 秒开始；整组对齐保持片段相对间隔。'),
+    h('header',[
+      h('button',{onClick:()=>e.seek(5)},'播放头到五秒'),h('button',{onClick:()=>e.seek(7)},'播放头到七秒'),
+      h('button',{onClick:()=>e.seek(18)},'播放头到十八秒'),h('button',{onClick:()=>e.seek(0)},'播放头归零'),
+      h('button',{onClick:()=>e.selectCanvas(e.allClips.value.map(clip=>clip.id),e.allClips.value[0].id)},'多选视觉片段'),
+      h('button',{onClick:()=>e.selectCanvas(e.allClips.value.filter(clip=>clip.name!=='后续文字').map(clip=>clip.id),e.allClips.value[0].id)},'仅选四类视觉片段'),
+      h('button',{onClick:e.undo,disabled:!e.canUndo.value},'撤销'),h('button',{onClick:e.redo,disabled:!e.canRedo.value},'重做'),
+      h('button',{onClick:()=>{for(let track=4;track<18;track++){const clip=createTextClip(0,20,track);clip.name='滚动测试 '+track;e.project.imageClips.push(clip)}}},'添加多轨滚动测试'),
+      h('button',{onClick:()=>{e.project.clips=[];e.project.imageClips=e.project.imageClips.filter(clip=>clip.media==='text');e.project.audioClips=[];e.playing.value ? e.pause() : e.play()}},e.playing.value ? '暂停测试播放' : '仅用文字测试播放保护')
+    ]),
+    h('div',{class:'area'},[h(MultiTimeline,{
+      ref:e.sceneTimeline,clips:e.allClips.value,markers:[],backgroundClips:e.project.backgroundClips,audioClips:e.project.audioClips,selectedIds:e.canvasSelection.value,selectedId:e.selectedId.value,selected:e.selected.value,
+      duration:e.project.duration,fps:e.project.fps,time:e.time.value,playing:e.playing.value,labels:e.paramLabels.value,pose:e.selectedPose.value,runtimes:e.runtimes,transformFields:e.transformFields,disabled:e.locked.value,
+      onAudioEdit:e.editAudioClip,onBackgroundEdit:e.editBackground,onEditClip:e.editClip,onBatchKeys:e.batchKeys,onMoveKey:e.moveKey,onReorderLayer:e.reorderLayer,
+      onAlignAtPlayhead:e.alignAtPlayhead,onTrimAtPlayhead:e.trimAtPlayhead,onLayerState:e.changeLayerState,onSeek:e.seek,onSelect:id=>e.selectedId.value=id,onSelectionChange:e.selectTimeline,onBatchClips:e.batchClips,onBeginEdit:e.beginEdit,onEndEdit:e.endEdit
+    })]),
+    h('pre',{'aria-label':'修剪状态'},JSON.stringify({time:e.time.value,playing:e.playing.value,visuals:e.allClips.value.map(state),background:e.project.backgroundClips.map(state),audio:e.project.audioClips.map(state),message:e.message.value},null,2))
+  ])
+}}).mount('#app')
+</script></html>

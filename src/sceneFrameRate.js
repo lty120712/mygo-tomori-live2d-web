@@ -1,6 +1,7 @@
 import { normalizeMotionEvents } from './timelineEvents.js'
 import { setClipKeyframe } from './sceneProject.js'
 import { visualClips } from './mediaTracks.js'
+import {normalizeMarkers} from './timelineMarkers.js'
 
 export function changeProjectFps(project, frame, next) {
   if (![24, 30, 60].includes(next) || next === project.fps) return frame
@@ -18,6 +19,7 @@ export function changeProjectFps(project, frame, next) {
     normalizeMotionEvents(clip,next)
   }
   project.fps = next
+  if(project.markers)project.markers=normalizeMarkers(project.markers,project.duration,next)
   return Math.min(Math.round(project.duration * next), Math.round(frame * ratio))
 }
 

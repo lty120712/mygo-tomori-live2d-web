@@ -61,6 +61,23 @@ test('播放同时调度当前与后续片段，未来片段到起点才发声',
   assert.deepEqual(created.gains[1].gain.calls, [['set', 1, 10.03]])
 })
 
+test('范围预览保留原有源入点，并把跨出点的音源截在播放范围末尾',async()=>{
+  const partial=createAudioClip(asset,1,8),late=createAudioClip({...asset,id:'late'},4,6,1),outside=createAudioClip({...asset,id:'outside'},5,3,2)
+  partial.offset=1.5
+  const {created,decoded,scheduler}=setup([partial,late,outside],{lookahead:0})
+  await scheduler.prepare({start:2,end:5})
+  assert.deepEqual(decoded.sort(),['late','song'])
+  const plan=await scheduler.play(2,{endTime:5})
+  assert.deepEqual(plan.map(p=>[p.assetId,p.offset,p.delay,p.duration]),[['song',2.5,0,3],['late',0,2,1]])
+  assert.deepEqual(created.sources.map(s=>s.started),[[10,2.5,3],[12,0,1]])
+  await scheduler.play(2,{endTime:5})
+  assert.ok(created.sources.slice(0,2).every(s=>s.stopped))
+  assert.deepEqual(created.sources.slice(2).map(s=>s.started),[[10,2.5,3],[12,0,1]])
+  await scheduler.play(5,{endTime:5})
+  assert.equal(created.sources.length,4)
+  assert.ok(created.sources.every(s=>s.stopped))
+})
+
 test('解码期间暂停或销毁，迟到的结果不能重启音源', async () => {
   for (const action of ['pause', 'destroy']) {
     let finish, entered

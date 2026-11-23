@@ -1,0 +1,41 @@
+<!doctype html><html lang="zh-CN"><meta charset="UTF-8"><title>文字批量样式隔离测试</title>
+<style>
+:root{font:13px system-ui;--editor-panel:#fff;--editor-soft:#f6f3f5;--editor-text:#342e35;--editor-muted:#817580;--editor-accent:#743a52;--editor-border:#ded5dc;--editor-focus:#ac7991;--editor-accent-soft:#f3e4eb;--editor-hover:#f6eaf0;--editor-radius:6px}body{margin:12px;background:#f6f3f5;color:#342e35}header{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;align-items:center}button{cursor:pointer;border:1px solid #ded5dc;border-radius:6px;background:white;color:inherit;padding:6px}button:disabled{opacity:.45}#layout{display:grid;grid-template-columns:230px minmax(300px,1fr) 300px;gap:12px}.controls{background:white;max-height:85vh;overflow:auto;padding:12px}.preview{background:#7a8c9f;height:320px;display:flex;flex-direction:column}pre{font-size:11px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:160px;overflow:auto}
+main{min-width:1200px}#layout>.asset-library{position:relative;left:auto;top:auto;bottom:auto;z-index:0;width:230px;max-height:85vh;box-shadow:none}
+</style><div id="app"></div><script type="module">
+import {createApp,h} from 'vue'
+import {useSceneEditor} from '../../src/composables/useSceneEditor.js'
+import {createLocalStore,memoryDocumentBackend,SCENE_KEY} from '../../src/localStore.js'
+import {createProject} from '../../src/sceneProject.js'
+import {createTextClip} from '../../src/mediaTracks.js'
+import {applyTextPreset} from '../../src/textPresets.js'
+import TextInspector from '../../src/components/TextInspector.vue'
+import AssetLibrary from '../../src/components/AssetLibrary.vue'
+import MultiTimeline from '../../src/components/MultiTimeline.vue'
+import SceneCanvas from '../../src/components/SceneCanvas.vue'
+const store=createLocalStore(memoryDocumentBackend()),initial=createProject()
+initial.imageClips=Array.from({length:4},(_,i)=>{
+  const c=applyTextPreset(createTextClip(i<3 ? i*2 : 0,2,i<3 ? 0 : 1),'dialogue-dark')
+  c.text=['第一句，保留这条内容','第二句，不同角色','第三句，独立时间','另一轨，不修改'][i];c.speaker='角色 '+(i+1)
+  c.textStyle.fontSize=24+i*4;c.textStyle.color=i===1 ? '#ffcc88' : '#ffffff';c.layerName=i<3 ? '字幕主轨' : '旁注'
+  return c
+})
+await store.set(SCENE_KEY,initial)
+createApp({setup(){
+  const e=useSceneEditor({store})
+  const multi=()=>{const clips=e.project.imageClips.slice(0,3);e.selectCanvas(clips.map(c=>c.id),clips[0].id)}
+  return ()=>h('main',[
+    h('header',[h('span','隔离测试 · 使用内存数据库，不改动用户工程'),h('button',{onClick:multi},'多选前三条'),h('button',{onClick:e.undo,disabled:!e.canUndo.value},'撤销'),h('button',{onClick:e.redo,disabled:!e.canRedo.value},'重做'),h('button',{onClick:()=>e.changeLayerState(0,{layerLocked:!e.project.imageClips[0].layerLocked})},'切换主轨锁定')]),
+    h('button',{onClick:()=>e.seek(0)},'回到开头'),h('p',{role:'status'},e.message.value),
+    h('div',{id:'layout'},[
+      h(AssetLibrary,{open:true,clips:e.allClips.value,customPresets:e.textPresets.presets.value,presetBusy:e.textPresets.busy.value,onAddText:e.addText,onRemoveTextPreset:e.textPresets.remove}),
+      h('section',[
+        h('div',{class:'preview'},[h(SceneCanvas,{clips:e.allClips.value,background:'#7a8c9f',time:e.time.value,duration:e.project.duration,fps:e.project.fps,aspectRatio:'16:9',selected:e.selected.value,selectedIds:e.canvasSelection.value,runtimes:e.runtimes,ref:e.sceneCanvas,onSelect:e.selectCanvas})]),
+        h(MultiTimeline,{clips:e.allClips.value,selected:e.selected.value,selectedId:e.selectedId.value,selectedIds:e.canvasSelection.value,duration:e.project.duration,fps:e.project.fps,time:e.time.value,labels:{},pose:e.selectedPose.value,runtimes:e.runtimes,transformFields:[],ref:e.sceneTimeline,onSelectionChange:e.selectTimeline,onSelect:id=>e.selectedId.value=id,onSeek:e.seek,onBatchClips:e.batchClips,onBeginEdit:e.beginEdit,onEndEdit:e.endEdit}),
+        h('pre',{id:'result'},JSON.stringify({selected:e.canvasSelection.value.length,clips:e.project.imageClips.map(c=>({text:c.text,speaker:c.speaker,start:c.start,duration:c.duration,fontSize:c.textStyle.fontSize,fontFamily:c.textStyle.fontFamily,color:c.textStyle.color,layout:c.textStyle.layout,locked:c.layerLocked})),presets:e.textPresets.presets.value.map(p=>p.name)})),
+      ]),
+      h('aside',{class:'controls'},e.textInspectorClip.value ? h(TextInspector,{clip:e.textInspectorClip.value,clips:e.textSelection.value,customPresets:e.textPresets.presets.value,presetBusy:e.textPresets.busy.value,onEdit:e.editText,onBeginEdit:e.beginEdit,onEndEdit:e.endEdit,onSelectTrack:e.selectTrackText,onSavePreset:e.saveTextPreset}) : '请选择文字'),
+    ]),
+  ])
+}}).mount('#app')
+</script></html>

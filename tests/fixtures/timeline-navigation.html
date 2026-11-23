@@ -1,0 +1,40 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>时间线导航回归</title>
+<style>:root{font:14px system-ui;--editor-panel:#f8f5f2;--editor-soft:#eee8e7;--editor-text:#342c30;--editor-muted:#786870;--editor-border:#dcd2d5;--editor-accent:#743a52;--editor-focus:#a76581;--editor-key:#805e18}body{margin:20px;background:#f8f4f6;color:#342c30}main{max-width:1100px;margin:auto}header{display:flex;align-items:center;gap:10px;flex-wrap:wrap}button{padding:7px;cursor:pointer}.area{margin:16px 0}.multi-timeline{height:390px!important}output{display:block;padding:12px;background:white;font-variant-numeric:tabular-nums}</style>
+<div id="app"></div><script type="module">
+import {createApp,h} from 'vue'
+import {useSceneEditor} from '../../src/composables/useSceneEditor.js'
+import {createLocalStore,memoryDocumentBackend,SCENE_KEY} from '../../src/localStore.js'
+import {createAssetStore,memoryBackend} from '../../src/assetStore.js'
+import {createProject} from '../../src/sceneProject.js'
+import {createTextClip,createColorBackgroundClip,createAudioClip} from '../../src/mediaTracks.js'
+import {formatTimecode} from '../../src/timecode.js'
+import MultiTimeline from '../../src/components/MultiTimeline.vue'
+import '../../src/editorTheme.css'
+const store=createLocalStore(memoryDocumentBackend()),project=createProject()
+project.duration=60
+project.imageClips=[createTextClip(1,2,0),createTextClip(30,5,1),createTextClip(56,3,2)]
+project.imageClips.forEach((clip,index)=>{clip.text=['开场','中间字幕','结尾字幕'][index];clip.name=clip.text;clip.layerName=clip.text})
+project.backgroundClips=[createColorBackgroundClip('#c9b1da',20,8)]
+project.audioClips=[createAudioClip({id:'navigation-fixture-audio',name:'测试音轨'},40,6)]
+await store.set(SCENE_KEY,project)
+createApp({setup(){
+  const e=useSceneEditor({store,assets:createAssetStore(memoryBackend())})
+  return()=>h('main',[
+    h('h2','时间线导航 · 长工程回归'),h('p','隔离内存工程。暂停时测试各类选区；循环播放仅保留文字，避免缺失音频影响时钟验证。'),
+    h('header',[
+      h('button',{onClick:()=>e.seek(0)},'播放头归零'),h('button',{onClick:()=>e.seek(30)},'定位到三十秒'),h('button',{onClick:()=>e.seek(58)},'定位到五十八秒'),
+      h('button',{onClick:()=>e.selectCanvas([e.project.imageClips[1].id],e.project.imageClips[1].id)},'选择中间字幕'),
+      h('button',{onClick:()=>e.selectCanvas(e.project.imageClips.map(clip=>clip.id),e.project.imageClips[0].id)},'选择全部字幕'),
+      h('button',{onClick:()=>{e.project.audioClips=[];e.loopPlayback.value=true;e.playing.value ? e.pause() : e.play()}},e.playing.value ? '暂停测试播放' : '循环测试播放')
+    ]),
+    h('div',{class:'area'},[h(MultiTimeline,{
+      ref:e.sceneTimeline,clips:e.allClips.value,markers:[],backgroundClips:e.project.backgroundClips,audioClips:e.project.audioClips,
+      selectedIds:e.canvasSelection.value,selectedId:e.selectedId.value,selected:e.selected.value,
+      duration:e.project.duration,fps:e.project.fps,time:e.time.value,playing:e.playing.value,labels:e.paramLabels.value,pose:e.selectedPose.value,runtimes:e.runtimes,transformFields:e.transformFields,disabled:e.locked.value,
+      onSeek:e.seek,onSelect:id=>e.selectedId.value=id,onSelectionChange:e.selectTimeline,onBatchClips:e.batchClips,onBeginEdit:e.beginEdit,onEndEdit:e.endEdit
+    })]),
+    h('output',{'aria-label':'播放状态'},(e.playing.value ? '播放中' : '已暂停')+' · '+formatTimecode(e.time.value,e.project.fps)),
+    h('output',{'aria-label':'历史状态'},'可撤销：'+e.canUndo.value+' · 可重做：'+e.canRedo.value)
+  ])
+}}).mount('#app')
+</script></html>

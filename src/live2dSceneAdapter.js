@@ -30,6 +30,7 @@ export function isolateModelDisposal(sdk) {
 // setParams 只保存覆盖表，并不会立即更新位图。暂停编辑后主动绘制，
 // 确保合成预览冻结的是修改后的姿态。
 export function renderModelNow(sdk) {
+  sdk?._state?.l2d2Model?.draw?.()
   const modern = sdk?._state?.l2d6Model
   if (modern && !modern._released) {
     for (const delegate of modern._subdelegates) delegate.update()

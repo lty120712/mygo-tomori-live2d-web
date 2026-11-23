@@ -21,3 +21,15 @@ test('关闭循环和录制均到末尾停止，录制覆盖循环开关',()=>{
   assert.equal(playbackFrame(300,300,false).ended,true)
   assert.equal(playbackFrame(-1,300,true).frame,0)
 })
+
+test('范围预览从入点计时，循环回到同一入点并保留跨多圈后的相位',()=>{
+  for(const fps of [24,30,60]){
+    const start=2*fps,end=5*fps,span=end-start
+    assert.equal(playbackFrame(start-10,end,true,false,start).frame,start)
+    assert.equal(playbackFrame(end-.1,end,true,false,start).frame,end-1)
+    assert.deepEqual(playbackFrame(end,end,true,false,start),{frame:start,wrapped:true,ended:false,remainder:0})
+    assert.deepEqual(playbackFrame(end+span*3+4.5,end,true,false,start),{frame:start+4,wrapped:true,ended:false,remainder:4.5})
+    assert.deepEqual(playbackFrame(end,end,false,false,start),{frame:end,wrapped:false,ended:true,remainder:0})
+  }
+  assert.equal(playbackFrame(9,9,true,false,8).frame,8)
+})

@@ -1,5 +1,5 @@
 <template>
-  <img v-if="thumb" class="clip-thumb" :src="thumb" alt="" />
+  <img v-if="thumb" class="clip-thumb" :src="thumb" alt="" draggable="false" />
 </template>
 <script setup>
 // 时间线上的视频片段只显示素材首帧缩略图：不额外解码视频，避免多个片段的 <video> 元素同时占用解码器。

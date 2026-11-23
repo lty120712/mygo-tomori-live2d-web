@@ -1,0 +1,29 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>模型渲染性能回归</title>
+<style>body{font:14px system-ui;background:#f5f1f4;color:#392d35;margin:24px}button{padding:8px;margin:4px}.preview{height:450px;display:flex;flex-direction:column}pre{padding:12px;background:white}</style>
+<div id="app"></div><script type="module">
+import {createApp,h,ref,nextTick} from 'vue'
+import models from 'virtual:model-manifest'
+import {createProject,createClip} from '../../src/sceneProject.js'
+import {createLocalStore,memoryDocumentBackend,SCENE_KEY} from '../../src/localStore.js'
+import {createAssetStore,memoryBackend} from '../../src/assetStore.js'
+import {useSceneEditor} from '../../src/composables/useSceneEditor.js'
+import SceneCanvas from '../../src/components/SceneCanvas.vue'
+const store=createLocalStore(memoryDocumentBackend()),project=createProject()
+project.clips=[createClip(models[0])];await store.set(SCENE_KEY,project)
+createApp({setup(){
+  const e=useSceneEditor({store,assets:createAssetStore(memoryBackend())}),result=ref('等待模型加载'),ready=ref(false)
+  function runtimeReady(id,runtime){e.runtimeReady(id,runtime);ready.value=runtime.infoReady}
+  async function burst(enabled){
+    e.changeMouseTrack(enabled);await nextTick()
+    const runtime=e.runtimes[e.project.clips[0].id],before=runtime.renderRevision
+    for(let i=0;i<1000;i++)e.mouseMoved({x:i%200,y:i%100})
+    await new Promise(requestAnimationFrame);await nextTick()
+    result.value=JSON.stringify({mouseTrack:enabled,inputEvents:1000,modelUpdates:runtime.renderRevision-before,expected:enabled?1:0},null,2)
+  }
+  return()=>h('main',[h('h2','模型渲染性能回归'),h('p','隔离内存工程：1000 次鼠标输入合并到一个显示帧；关闭鼠标跟随后不重绘模型。'),
+    h('button',{disabled:!ready.value,onClick:()=>burst(true)},'测试一千次鼠标输入'),
+    h('button',{disabled:!ready.value,onClick:()=>burst(false)},'测试关闭鼠标跟随'),
+    h('pre',{'aria-label':'性能结果'},result.value),
+    h('div',{class:'preview'},[h(SceneCanvas,{clips:e.allClips.value,background:'#9aafc1',time:e.time.value,duration:e.project.duration,fps:e.project.fps,aspectRatio:'16:9',runtimes:e.runtimes,playing:e.playing.value,ref:e.sceneCanvas,onReady:runtimeReady,onDispose:e.disposeRuntime,onError:e.runtimeError})])])
+}}).mount('#app')
+</script></html>

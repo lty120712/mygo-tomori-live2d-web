@@ -1,0 +1,30 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>自动工程时长回归</title>
+<style>:root{font:14px system-ui;--editor-panel:#fff;--editor-soft:#f4edf1;--editor-text:#342e35;--editor-muted:#716371;--editor-border:#d5c7d1;--editor-accent:#925c81}body{margin:24px;background:#f8f4f6;color:var(--editor-text)}main{max-width:1000px;margin:auto}button{padding:5px 8px;margin:3px;cursor:pointer}output{display:block;margin:10px 0}</style>
+<div id="app"></div><script type="module">
+import {createApp,h,ref} from 'vue'
+import models from 'virtual:model-manifest'
+import {useSceneEditor} from '../../src/composables/useSceneEditor.js'
+import {createLocalStore,memoryDocumentBackend,SCENE_KEY} from '../../src/localStore.js'
+import {createAssetStore,memoryBackend} from '../../src/assetStore.js'
+import {createProject,createClip} from '../../src/sceneProject.js'
+import {formatTimecode} from '../../src/timecode.js'
+import MultiTimeline from '../../src/components/MultiTimeline.vue'
+import VideoExportDialog from '../../src/components/VideoExportDialog.vue'
+const store=createLocalStore(memoryDocumentBackend()),assets=createAssetStore(memoryBackend()),project=createProject()
+project.clips=[createClip(models[0],0,6)];project.duration=22
+await store.set(SCENE_KEY,project)
+createApp({setup(){
+  const e=useSceneEditor({store,assets}),dialog=ref(null)
+  return()=>h('main',[h('h2','工程时长 · 6 秒模型与 22 秒音频'),h('p','隔离内存工程。初始清单保留 22 秒旧值，载入时按模型的实际结束位置重算。'),
+    h('button',{disabled:!e.project.clips.length || !!e.project.audioClips.length,onClick:()=>{e.seek(0);e.addAudioClip({id:'duration-fixture',name:'22 秒音频',duration:22})}},'添加 22 秒音频'),
+    h('button',{disabled:!e.project.audioClips.length,onClick:()=>e.seek(20)},'播放头到 20 秒'),
+    h('button',{disabled:!e.canUndo.value,onClick:e.undo},'撤销'),h('button',{disabled:!e.canRedo.value,onClick:e.redo},'重做'),
+    h('button',{onClick:()=>dialog.value.open()},'查看视频导出范围'),
+    h('output',{'aria-label':'工程时长状态'},'播放头 '+formatTimecode(e.time.value,e.project.fps)+' / 工程总时长 '+formatTimecode(e.project.duration,e.project.fps)),
+    h(VideoExportDialog,{ref:dialog,recorder:e.recorder,aspectRatio:e.project.aspectRatio,fps:e.project.fps,duration:e.project.duration}),
+    h(MultiTimeline,{ref:e.sceneTimeline,clips:e.allClips.value,markers:e.project.markers,backgroundClips:e.project.backgroundClips,audioClips:e.project.audioClips,
+      selectedIds:e.canvasSelection.value,selectedId:e.selectedId.value,selected:e.selected.value,labels:e.paramLabels.value,pose:e.selectedPose.value,runtimes:e.runtimes,
+      transformFields:e.transformFields,duration:e.project.duration,fps:e.project.fps,time:e.time.value,
+      onSelect:id=>e.selectedId.value=id,onSelectionChange:e.selectTimeline,onSeek:e.seek,onDeleteAudio:e.deleteAudioClip,onBeginEdit:e.beginEdit,onEndEdit:e.endEdit})])
+}}).mount('#app')
+</script></html>

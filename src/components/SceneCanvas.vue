@@ -1,5 +1,5 @@
 <template>
-  <div ref="fullscreenRoot" class="scene-preview" :class="{'preview-fullscreen':fullscreen.active.value}" @keydown.capture="fullscreenKey">
+  <div ref="fullscreenRoot" class="scene-preview" :class="{'preview-fullscreen':fullscreen.active.value,'preview-compact':compact && !fullscreen.active.value}" @keydown.capture="fullscreenKey">
     <button v-if="fullscreen.active.value" class="fullscreen-toggle" :aria-expanded="controlsVisible" @click="controlsVisible=!controlsVisible">{{controlsVisible ? '隐藏控件' : '显示控件'}}</button>
     <div v-if="fullscreen.active.value && controlsVisible" class="fullscreen-controls" role="group" aria-label="全屏预览控制">
       <button :disabled="recording" @click="emit('toggle-play')">{{playing ? '暂停' : '播放'}}</button>
@@ -11,11 +11,13 @@
       <button v-for="tool in layoutTools" :key="tool.key" :disabled="playing || !layoutSelection(selectionEntries,tool.key).length" :title="tool.title" @click="applyLayout(tool.key)">{{ tool.label }}</button>
     </div>
     <div class="preview-tools" role="group" aria-label="画布缩放"><span>画布</span><small aria-hidden="true">10%</small><input type="range" aria-label="画布缩放比例" min="10" max="200" step="1" :value="displayZoom" :aria-valuetext="displayZoom+'%'" @input="changePreviewZoom($event.target.value)" /><small aria-hidden="true">200%</small><output aria-live="off">{{displayZoom}}%</output><button :aria-pressed="previewFit==='manual' && manualZoom===100" title="按工程尺寸显示：100%" @click="changePreviewZoom(100)">100%</button><button :aria-pressed="previewFit==='width'" title="按预览区宽度显示，超出高度时上下滚动" @click="fitPreview('width')">适应宽度</button><button :aria-pressed="previewFit==='contain'" title="保持比例并完整显示画面" @click="fitPreview('contain')">完整画面</button><button aria-label="全屏预览" title="全屏预览画布，Esc 退出" @click="fullscreen.enter">全屏预览</button></div>
-    <div class="preview-viewport" ref="preview" :class="{'pan-active':!!panDrag}" title="按住鼠标中键拖动平移视野" @pointerdown.capture="beginPan" @pointermove="movePan" @pointerup="endPan" @pointercancel="endPan" @lostpointercapture="endPan" @auxclick.middle.prevent>
-    <div class="scene-stage" ref="stage" tabindex="0" aria-label="画布编辑区域" @keydown="nudgeKey" @focusout="endNudge" :style="{ width: stageWidth + 'px', height:stageWidth*size.height/size.width+'px',transform:'translate('+viewPan.x+'px,'+viewPan.y+'px)' }" @pointermove="pointerMove" @pointerup="pointerUp" @pointercancel="pointerUp" @lostpointercapture="pointerUp">
+    <div v-if="selectedText && !fullscreen.active.value && !playing && !recording" class="text-canvas-tools" role="group" aria-label="画布文字工具"><button @click="startTextEdit(selectedText)">编辑文字</button><button :aria-pressed="textTool==='box'" @click="textTool='box'">调整框宽</button><button :aria-pressed="textTool==='scale'" @click="textTool='scale'">缩放文字</button><small>{{textTool==='box' ? '拖动左右边缘调整换行，字号不变' : '拖动手柄缩放文字和底框'}}</small></div>
+    <div v-if="textDraft" class="canvas-text-editor" role="group" aria-label="画布正文编辑" @pointerdown.stop @keydown.stop><label>编辑正文<textarea ref="textInput" aria-label="画布文字内容" v-model="textDraft.value" maxlength="2000" rows="4" @blur="finishTextEdit" @keydown="textEditKey" /></label><div><small>Enter 换行 · Ctrl / ⌘ + Enter 完成 · Esc 取消</small><button @pointerdown.prevent @click="finishTextEdit">完成</button><button @pointerdown.prevent @click="cancelTextEdit">取消</button></div></div>
+    <div class="preview-viewport" ref="preview" :inert="compact && !fullscreen.active.value" :class="{'pan-active':!!panDrag}" title="按住鼠标中键拖动平移视野" @pointerdown.capture="beginPan" @pointermove="movePan" @pointerup="endPan" @pointercancel="endPan" @lostpointercapture="endPan" @auxclick.middle.prevent>
+    <div class="scene-stage" ref="stage" tabindex="0" aria-label="画布编辑区域" @dblclick="editTextAtPoint" @keydown="nudgeKey" @focusout="endNudge" :style="{ width: stageWidth + 'px', height:stageWidth*size.height/size.width+'px',transform:compact && !fullscreen.active.value ? undefined : 'translate('+viewPan.x+'px,'+viewPan.y+'px)' }" @pointermove="pointerMove" @pointerup="pointerUp" @pointercancel="pointerUp" @lostpointercapture="pointerUp">
       <canvas ref="canvas" :width="Math.round(size.width*renderScale)" :height="Math.round(size.height*renderScale)" aria-label="场景合成画布" @pointerdown="pointerDown"></canvas>
       <div v-if="selectionEntries.length>1" v-for="entry in selectionEntries" :key="entry.id" class="selection-outline member-outline" :style="poseBox(entry.pose)" aria-hidden="true"></div>
-      <div v-if="selectedBox" class="selection-outline" :style="selectedBox" :aria-label="'已选 '+selectionEntries.length+' 个图层'"><span>{{ selectionEntries.length>1 ? '已选 '+selectionEntries.length+' 个图层' : selected?.name }}</span><template v-if="!playing"><button v-for="corner in ['nw','ne','sw','se']" :key="corner" class="transform-handle scale-handle" :class="corner" :aria-label="'缩放图层 '+corner" :title="selectionEntries.length>1 ? '围绕选区中心整体缩放' : '拖动等比缩放，对角固定'" @pointerdown.stop.prevent="beginTransform($event,'scale',corner)"></button><template v-if="selectionEntries.length===1"><button v-for="edge in ['n','s','e','w']" :key="edge" class="transform-handle axis-handle" :class="edge" :aria-label="'单轴缩放图层 '+edge" :title="edge==='e' || edge==='w' ? '只缩放 X，对侧固定' : '只缩放 Y，对侧固定'" @pointerdown.stop.prevent="beginTransform($event,edge==='e' || edge==='w' ? 'scaleX' : 'scaleY',edge)"></button></template><i class="rotation-stem" aria-hidden="true"></i><button class="transform-handle rotate-handle" aria-label="旋转图层" title="拖动旋转；按住 Shift 吸附到 15°" @pointerdown.stop.prevent="beginTransform($event,'rotate')">↻</button></template></div>
+      <div v-if="selectedBox" class="selection-outline" :style="selectedBox" :aria-label="'已选 '+selectionEntries.length+' 个图层'"><span>{{ selectionEntries.length>1 ? '已选 '+selectionEntries.length+' 个图层' : selected?.name }}</span><template v-if="!playing"><template v-if="!selectedText || textTool==='scale'"><button v-for="corner in ['nw','ne','sw','se']" :key="corner" class="transform-handle scale-handle" :class="corner" :aria-label="'缩放图层 '+corner" :title="selectionEntries.length>1 ? '围绕选区中心整体缩放' : '拖动等比缩放，对角固定'" @pointerdown.stop.prevent="beginTransform($event,'scale',corner)"></button><template v-if="selectionEntries.length===1"><button v-for="edge in ['n','s','e','w']" :key="edge" class="transform-handle axis-handle" :class="edge" :aria-label="'单轴缩放图层 '+edge" :title="edge==='e' || edge==='w' ? '只缩放 X，对侧固定' : '只缩放 Y，对侧固定'" @pointerdown.stop.prevent="beginTransform($event,edge==='e' || edge==='w' ? 'scaleX' : 'scaleY',edge)"></button></template></template><template v-if="selectedText && textTool==='box'"><button v-for="edge in ['e','w']" :key="edge" class="transform-handle axis-handle text-width-handle" :class="edge" :aria-label="'调整文字框宽 '+edge" title="调整框宽并自动换行，字号不变" @pointerdown.stop.prevent="beginTextWidth($event,edge)"></button></template><i class="rotation-stem" aria-hidden="true"></i><button class="transform-handle rotate-handle" aria-label="旋转图层" title="拖动旋转；按住 Shift 吸附到 15°" @pointerdown.stop.prevent="beginTransform($event,'rotate')">↻</button></template></div>
       <div v-if="marquee" class="canvas-marquee" :style="marquee" aria-hidden="true"></div>
       <div v-for="guide in guides" :key="guide.axis" class="canvas-guide" :class="guide.axis" :style="guide.axis==='x' ? {left:(guide.value+size.width/2)/size.width*100+'%'} : {top:(guide.value+size.height/2)/size.height*100+'%'}" aria-hidden="true"></div>
       <div v-if="!clips.length" class="empty-scene">从左侧素材库添加模型或图片到场景</div>
@@ -30,8 +32,12 @@ import ClipRenderer from './ClipRenderer.vue'
 import { backgroundAtTime, isImageClip, isMediaClip, isVideoClip, paintBackground as paintSceneBackground, mediaDimensions, visualLayerFilter, visualPose } from '../mediaTracks.js'
 import { createImageSources } from '../imageSources.js'
 import { createVideoSources } from '../videoSources.js'
+import {createOfflineVideoSources} from '../offlineVideoSources.js'
 import { assetStore } from '../assetStore.js'
-import {sceneDrawOrder,sceneHitOrder} from '../sceneLayers.js'
+import {sceneDrawOrder} from '../sceneLayers.js'
+import {hitSceneClip,paintedPose} from '../canvasHitTest.js'
+import {paintCroppedMedia} from '../mediaCrop.js'
+import {applyMediaMask} from '../mediaMask.js'
 import { clipVisible, sampleClip, sceneSize } from '../sceneProject.js'
 import { beginCanvasTransform,scaleCanvasTransform,scaleCanvasAxis,rotateCanvasTransform } from '../canvasTransform.js'
 import {scaleX,scaleY} from '../visualScale.js'
@@ -42,6 +48,10 @@ import { usePreviewFullscreen } from '../composables/usePreviewFullscreen.js'
 import { formatTimecode } from '../timecode.js'
 import { applyVisualComposite } from '../visualComposite.js'
 import { isTextClip, paintText } from '../textTracks.js'
+import {sampleTextAnimation} from '../textAnimation.js'
+import {resizeTextBox} from '../textBoxTransform.js'
+import {ensureClipFonts} from '../textFonts.js'
+import {capturePausedFrame} from '../pausedFrame.js'
 const fullscreenRoot=ref(null),exitFullscreenButton=ref(null)
 const fullscreen=usePreviewFullscreen(fullscreenRoot)
 const controlsVisible=ref(true)
@@ -50,8 +60,34 @@ function fullscreenKey(event){
   event.preventDefault();event.stopPropagation()
   if(!event.repeat && !props.recording)emit('toggle-play')
 }
-const props = defineProps({ clips: Array, backgroundClips: { type: Array, default: () => [] }, time: Number, duration: { type: Number, default: 0 }, fps: Number, aspectRatio:String, selected: Object, selectedIds:Array, runtimes: Object, playing: Boolean, background: String, backgroundImage: String, recording: Boolean })
-const emit = defineEmits(['ready', 'dispose', 'error', 'select', 'move', 'transform', 'batch-transform', 'begin-edit', 'end-edit', 'background-ready', 'mouse-position', 'image-status', 'toggle-play', 'seek'])
+const props = defineProps({ compact:Boolean, assetProvider:{type:Object,default:()=>assetStore},clips: Array, backgroundClips: { type: Array, default: () => [] }, time: Number, duration: { type: Number, default: 0 }, fps: Number, aspectRatio:String, selected: Object, selectedIds:Array, runtimes: Object, playing: Boolean, background: String, backgroundImage: String, recording: Boolean })
+const emit = defineEmits(['ready', 'dispose', 'error', 'select', 'move', 'transform', 'batch-transform', 'begin-edit', 'end-edit', 'background-ready', 'mouse-position', 'image-status', 'toggle-play', 'seek','text-content','text-width'])
+const textTool=ref('box'),textDraft=ref(null),textInput=ref(null)
+async function startTextEdit(clip){
+  if(!isTextClip(clip) || clip.layerLocked || props.playing || props.recording || fullscreen.active.value)return
+  pointerUp({type:'pointercancel'});endNudge();emit('select',[clip.id],clip.id)
+  textDraft.value={id:clip.id,original:clip.text,value:clip.text}
+  await nextTick();textInput.value?.focus()
+}
+function finishTextEdit(){
+  const draft=textDraft.value;if(!draft)return
+  textDraft.value=null
+  const clip=props.clips.find(c=>c.id===draft.id)
+  if(!clip || clip.layerLocked || props.playing || props.recording || clip.text!==draft.original || draft.value===draft.original)return
+  emit('begin-edit');emit('text-content',draft.id,{text:draft.value});emit('end-edit')
+}
+function cancelTextEdit(){textDraft.value=null;nextTick(()=>stage.value?.focus({preventScroll:true}))}
+function textEditKey(event){
+  if(event.isComposing)return
+  if(event.key==='Escape'){event.preventDefault();cancelTextEdit()}
+  else if(event.key==='Enter' && (event.ctrlKey || event.metaKey)){event.preventDefault();finishTextEdit();nextTick(()=>stage.value?.focus({preventScroll:true}))}
+}
+function editTextAtPoint(event){if(event.target.closest?.('button,input,textarea'))return;if(!props.playing && !props.recording && !fullscreen.active.value)startTextEdit(hitAt(point(event)))}
+const fontVersion=ref(0)
+watch(()=>props.clips.filter(isTextClip).map(c=>c.textStyle?.fontFamily),(families,_,cleanup)=>{
+  let active=true;cleanup(()=>active=false)
+  ensureClipFonts(families.map(fontFamily=>({media:'text',textStyle:{fontFamily}}))).then(()=>{if(active)fontVersion.value++},error=>{if(active)emit('error',null,error.message)})
+},{immediate:true})
 const backgroundAssets=computed(()=>props.backgroundClips.filter(c=>c.kind==='image' && c.assetId).map(c=>c.assetId))
 const imageAssets=computed(()=>props.clips.filter(isImageClip).map(c=>c.assetId))
 const videoAssets=computed(()=>props.clips.filter(isVideoClip).map(c=>c.assetId))
@@ -64,16 +100,19 @@ function emitMediaStatus(){
     backgrounds:props.backgroundClips.filter(c=>c.kind==='image' && images.status(c.assetId)==='missing'),
   })
 }
-const images=createImageSources({blob:id=>assetStore.blob(id),changed:emitMediaStatus})
-const videos=createVideoSources({url:id=>assetStore.url(id),changed:emitMediaStatus})
+const images=createImageSources({blob:id=>props.assetProvider.blob(id),changed:emitMediaStatus})
+const videos=createVideoSources({url:id=>props.assetProvider.url(id),changed:emitMediaStatus})
 watch(()=>[...imageAssets.value,...backgroundAssets.value],ids=>images.sync(ids),{immediate:true,flush:'sync'})
 watch(videoAssets,ids=>videos.sync(ids),{immediate:true,flush:'sync'})
 const size=computed(()=>sceneSize(props.aspectRatio))
-const renderScale=computed(()=>fullscreen.active.value && !props.recording ? Math.max(1,Math.min(4,stageWidth.value/size.value.width*(window.devicePixelRatio || 1))) : 1)
-const modelResolution=computed(()=>fullscreen.active.value && !props.recording ? Math.max(1,renderScale.value/(window.devicePixelRatio || 1)) : 1)
+const exportScale=ref(0)
+const offlineMode=ref(false),offlineFrames=new Map()
+const offlineVideos=createOfflineVideoSources({url:id=>props.assetProvider.url(id)})
+const renderScale=computed(()=>exportScale.value || (fullscreen.active.value ? Math.max(1,Math.min(4,stageWidth.value/size.value.width*(window.devicePixelRatio || 1))) : 1))
+const modelResolution=computed(()=>exportScale.value ? Math.max(1,exportScale.value/(window.devicePixelRatio || 1)) : fullscreen.active.value ? Math.max(1,renderScale.value/(window.devicePixelRatio || 1)) : 1)
 // 隐藏与独见统一在这里判断：模型、图片、背景共用一套规则。
 const layerFilter=computed(()=>visualLayerFilter(props.clips,props.backgroundClips))
-const previewFit=ref('width')
+const previewFit=ref('contain')
 const manualZoom=ref(100)
 const panDrag=ref(null),viewPan=ref({x:0,y:0})
 const cancelPan=()=>endPan()
@@ -115,9 +154,15 @@ watch(()=>props.backgroundImage,src=>{
 },{immediate:true})
 function ready(id, runtime) { emit('ready', id, runtime) }
 function dispose(id) { emit('dispose', id) }
-function pose(clip) { return visualPose(clip, sampleClip(clip, props.time, props.fps, props.runtimes[clip.id]?.groups || []).transform) }
+function pose(clip) { fontVersion.value;return visualPose(clip, sampleClip(clip, props.time, props.fps, props.runtimes[clip.id]?.groups || []).transform) }
 const editableClips=computed(()=>props.clips.filter(c=>!c.layerLocked && clipVisible(c,props.time) && layerFilter.value.clipVisible(c)))
 const selectionEntries=computed(()=>editableClips.value.filter(c=>(props.selectedIds || [props.selected?.id]).includes(c.id)).map(c=>({id:c.id,pose:pose(c)})))
+const selectedText=computed(()=>selectionEntries.value.length===1 ? props.clips.find(c=>c.id===selectionEntries.value[0].id && isTextClip(c)) : null)
+watch(()=>[props.time,props.playing,props.recording,fullscreen.active.value,props.clips.find(c=>c.id===textDraft.value?.id)?.layerLocked,props.clips.find(c=>c.id===textDraft.value?.id)?.text],()=>{
+  const draft=textDraft.value;if(!draft)return
+  const clip=props.clips.find(c=>c.id===draft.id)
+  if(!clip || clip.layerLocked || !clipVisible(clip,props.time) || props.playing || props.recording || fullscreen.active.value || clip.text!==draft.original)textDraft.value=null
+})
 function poseBox(t){
   return {
     left: ((size.value.width/2 + t.x - (t.width ?? 320)/2 * scaleX(t)) / size.value.width * 100) + '%', top: ((size.value.height/2 + t.y - (t.height ?? 510)/2 * scaleY(t)) / size.value.height * 100) + '%',
@@ -158,17 +203,15 @@ function trackMouse(e) {
   emit('mouse-position',point(e))
 }
 function clearMouse(e) {if(!e.relatedTarget)emit('mouse-position',null)}
+function hitAt(p){
+  return hitSceneClip(editableClips.value,pose,p,props.time,props.fps)
+}
 function pointerDown(e) {
   if(fullscreen.active.value)return
   endNudge();stage.value.focus({preventScroll:true})
   if (props.playing || props.recording || e.button !== 0) return
   const p = point(e)
-  const sorted = sceneHitOrder(editableClips.value)
-  const hit = sorted.find(c => {
-    const t = pose(c), r = -t.rotation * Math.PI / 180
-    const x = p.x - t.x, y = p.y - t.y
-    return Math.abs(x * Math.cos(r) - y * Math.sin(r)) <= (t.width ?? 320)/2 * scaleX(t) && Math.abs(x * Math.sin(r) + y * Math.cos(r)) <= (t.height ?? 510)/2 * scaleY(t)
-  })
+  const hit=hitAt(p)
   const current=selectionEntries.value.map(e=>e.id)
   if (!hit){drag={mode:'box',point:p,last:p,base:e.shiftKey ? current : []};stage.value.setPointerCapture(e.pointerId);return}
   if(e.shiftKey){const ids=current.includes(hit.id) ? current.filter(id=>id!==hit.id) : [...current,hit.id];emit('select',ids,ids.at(-1));return}
@@ -185,9 +228,20 @@ function beginTransform(e,mode,corner='se'){
   emit('begin-edit');drag={...beginCanvasTransform(t,p,corner),id:entries[0].id,entries,center:selectionBounds(entries),mode}
   stage.value.setPointerCapture(e.pointerId)
 }
+function beginTextWidth(event,edge){
+  if(event.button!==0 || !selectedText.value || props.playing || props.recording)return
+  finishTextEdit();endNudge();stage.value.focus({preventScroll:true})
+  const clip=selectedText.value,t=pose(clip)
+  emit('begin-edit')
+  drag={mode:'text-width',id:clip.id,clip:JSON.parse(JSON.stringify(clip)),pose:{...t},point:point(event),edge,entries:[{id:clip.id,pose:t}]}
+  stage.value.setPointerCapture(event.pointerId)
+}
 function pointerMove(e) {
   if (!drag) return
   const p = point(e)
+  if(drag.mode==='text-width'){
+    emit('text-width',drag.id,resizeTextBox(drag.clip,drag.pose,drag.point,p,drag.edge));return
+  }
   if(drag.mode==='box'){
     drag.last=p
     marquee.value={left:(Math.min(drag.point.x,p.x)+size.value.width/2)/size.value.width*100+'%',top:(Math.min(drag.point.y,p.y)+size.value.height/2)/size.value.height*100+'%',width:Math.abs(p.x-drag.point.x)/size.value.width*100+'%',height:Math.abs(p.y-drag.point.y)/size.value.height*100+'%'}
@@ -247,7 +301,7 @@ function paint() {
     ctx.clearRect(0, 0, size.value.width, size.value.height)
     const filter=layerFilter.value
     const background=backgroundAtTime(filter.backgroundVisible() ? props.backgroundClips : [],{color:props.background,image:props.backgroundImage},props.time)
-    paintSceneBackground(ctx,background,{width:size.value.width,height:size.value.height,bitmap:background.kind==='image' ? images.get(background.assetId) : null,legacyImage:backgroundImage,fallback:props.background})
+    paintSceneBackground(ctx,background,{width:size.value.width,height:size.value.height,bitmap:background.kind==='image' ? images.get(background.assetId) : null,legacyImage:backgroundImage,fallback:props.background,baseBackground:backgroundAtTime([],{color:props.background,image:props.backgroundImage},props.time)})
     const activeVideos=new Set()
     for (const clip of sceneDrawOrder(props.clips)) {
       if (!clipVisible(clip, props.time) || !filter.clipVisible(clip)) continue
@@ -255,31 +309,34 @@ function paint() {
         const t=pose(clip)
         ctx.save();ctx.translate(size.value.width/2+t.x,size.value.height/2+t.y)
         ctx.rotate(t.rotation*Math.PI/180);ctx.scale(scaleX(t),scaleY(t))
-        applyVisualComposite(ctx,clip,t.opacity);paintText(ctx,clip);ctx.restore()
+        const animation=sampleTextAnimation(clip,props.time,props.fps)
+        ctx.translate(0,animation.y);ctx.scale(animation.scale,animation.scale)
+        applyMediaMask(ctx,clip.mask,mediaDimensions(clip))
+        applyVisualComposite(ctx,clip,t.opacity*animation.opacity);paintText(ctx,clip,{reveal:animation.reveal});ctx.restore()
         continue
       }
       if(isVideoClip(clip)) {
         // 播放与录制让视频按原生速度走，暂停与拖动播放头则 seek 到对应的一帧。
         const playing=props.playing || props.recording
-        const source=videos.align(clip.assetId,(clip.offset || 0)+(props.time-clip.start),{playing})
+        const source=offlineMode.value ? offlineFrames.get(clip.id) : videos.align(clip.assetId,(clip.offset || 0)+(props.time-clip.start),{playing})
         activeVideos.add(clip.assetId)
-        if(source && videos.drawable(clip.assetId)) {
-          const t=pose(clip),dimensions=mediaDimensions(clip)
+        if(source && (offlineMode.value || videos.drawable(clip.assetId))) {
+          const t=paintedPose(clip,pose(clip),props.time,props.fps),dimensions=mediaDimensions(clip)
           ctx.save();ctx.translate(size.value.width/2+t.x,size.value.height/2+t.y)
           ctx.rotate(t.rotation*Math.PI/180);ctx.scale(scaleX(t),scaleY(t))
           applyVisualComposite(ctx,clip,t.opacity)
-          ctx.drawImage(source,-dimensions.width/2,-dimensions.height/2,dimensions.width,dimensions.height);ctx.restore()
+          paintCroppedMedia(ctx,source,clip,dimensions);ctx.restore()
         }
         continue
       }
       if(isImageClip(clip)) {
         const source=images.get(clip.assetId)
         if(source){
-          const t=pose(clip),dimensions=mediaDimensions(clip)
+          const t=paintedPose(clip,pose(clip),props.time,props.fps),dimensions=mediaDimensions(clip)
           ctx.save();ctx.translate(size.value.width/2+t.x,size.value.height/2+t.y)
           ctx.rotate(t.rotation*Math.PI/180);ctx.scale(scaleX(t),scaleY(t))
           applyVisualComposite(ctx,clip,t.opacity)
-          ctx.drawImage(source,-dimensions.width/2,-dimensions.height/2,dimensions.width,dimensions.height);ctx.restore()
+          paintCroppedMedia(ctx,source,clip,dimensions);ctx.restore()
         }
         continue
       }
@@ -290,50 +347,59 @@ function paint() {
       if (!source?.width || !source?.height) continue
       // SDK 的呼吸/眨眼继续运行；暂停预览用快照，避免时间线停了画面还在动。
       // 参数或播放头改变后等两个绘制周期，再冻结更新后的姿态。
-      if (props.playing || runtime.livePreview) pausedFrames.delete(clip.id)
+      if (offlineMode.value || props.playing || runtime.livePreview) pausedFrames.delete(clip.id)
       else {
-        let frozen = pausedFrames.get(clip.id)
-        if (!frozen || frozen.revision !== runtime.renderRevision) {
-          const image = document.createElement('canvas')
-          image.width = source.width; image.height = source.height
-          frozen = { image, revision: runtime.renderRevision, captures: 0 }
-          pausedFrames.set(clip.id, frozen)
-        }
-        if (frozen.captures < 2) {
-          frozen.image.getContext('2d').clearRect(0, 0, source.width, source.height)
-          frozen.image.getContext('2d').drawImage(source, 0, 0)
-          frozen.captures++
-        }
-        source = frozen.image
+        source = capturePausedFrame(pausedFrames,clip.id,source,runtime.renderRevision)
       }
       ctx.save()
       ctx.translate(size.value.width/2 + t.x, size.value.height/2 + t.y)
       ctx.rotate(t.rotation * Math.PI / 180)
       ctx.scale(scaleX(t),scaleY(t))
       applyVisualComposite(ctx,clip,t.opacity)
+      applyMediaMask(ctx,clip.mask,{width:t.width ?? 320,height:t.height ?? 510})
       ctx.drawImage(source, -480, -270, 960, 540)
       ctx.restore()
     }
     videos.pauseExcept(activeVideos)
     for (const id of pausedFrames.keys()) if (!props.clips.some(c=>c.id===id)) pausedFrames.delete(id)
     if(exportCanvas){
-      if(exportCanvas.width!==size.value.width)exportCanvas.width=size.value.width
-      if(exportCanvas.height!==size.value.height)exportCanvas.height=size.value.height
+      const scale=exportScale.value || 1
+      if(exportCanvas.width!==size.value.width*scale)exportCanvas.width=size.value.width*scale
+      if(exportCanvas.height!==size.value.height*scale)exportCanvas.height=size.value.height*scale
       exportCanvas.getContext('2d').drawImage(canvas.value,0,0,exportCanvas.width,exportCanvas.height)
     }
   }
 }
 function draw(){paint();raf=requestAnimationFrame(draw)}
 let exportCanvas=null
-defineExpose({ getCanvas: () => {exportCanvas ||= document.createElement('canvas');paint();return exportCanvas} })
+defineExpose({ getCanvas: () => {exportCanvas ||= document.createElement('canvas');paint();return exportCanvas},
+  async prepareExport(height=1080,offline=false){
+    offlineMode.value=offline
+    exportScale.value=Number(height)/540
+    await nextTick();await nextTick()
+    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))
+    await images.ready()
+    pausedFrames.clear();paint()
+  },
+  async renderExportFrame(signal){
+    offlineFrames.clear()
+    for(const clip of props.clips.filter(c=>isVideoClip(c) && clipVisible(c,props.time) && layerFilter.value.clipVisible(c))){
+      offlineFrames.set(clip.id,await offlineVideos.frame(clip,(clip.offset || 0)+(props.time-clip.start),signal))
+    }
+    exportCanvas ||= document.createElement('canvas');paint();return exportCanvas
+  },
+  finishExport(){offlineMode.value=false;offlineFrames.clear();offlineVideos.destroy();exportScale.value=0;pausedFrames.clear()}
+})
 watch(modelResolution,async()=>{await nextTick();await nextTick();pausedFrames.clear()})
 function resizePreview(){
   if(!preview.value)return
-  const padding=fullscreen.active.value ? 0 : 24
+  const padding=fullscreen.active.value ? 0 : props.compact ? 12 : 24
   const width=Math.max(1,preview.value.clientWidth-padding),height=Math.max(1,preview.value.clientHeight-padding)
+  if(props.compact && !fullscreen.active.value){stageWidth.value=Math.min(width,height*size.value.width/size.value.height);return}
   const fitWidth=previewFit.value==='width' ? width : Math.min(width,height*size.value.width/size.value.height)
   stageWidth.value=fullscreen.active.value ? Math.min(width,height*size.value.width/size.value.height) : previewFit.value==='manual' ? size.value.width*manualZoom.value/100 : Math.max(size.value.width*.1,Math.min(size.value.width*2,fitWidth))
 }
+watch(()=>props.compact,()=>nextTick(resizePreview))
 async function fitPreview(mode){viewPan.value={x:0,y:0};previewFit.value=mode;resizePreview();await nextTick();if(preview.value){preview.value.scrollTop=0;preview.value.scrollLeft=0}}
 watch([previewFit,manualZoom,()=>props.aspectRatio],async()=>{
   const viewport=preview.value,element=stage.value
@@ -372,13 +438,15 @@ onMounted(() => {
   resizeObserver.observe(preview.value)
   raf = requestAnimationFrame(draw)
 })
-onBeforeUnmount(() => {images.destroy();videos.destroy();endPan();window.removeEventListener('blur',cancelPan);pointerUp({type:'pointercancel'});endNudge();window.removeEventListener('keyup',nudgeUp);window.removeEventListener('blur',endNudge);document.removeEventListener('pointermove',trackMouse);document.removeEventListener('pointerout',clearMouse);imageRequest++;backgroundImage=null;cancelAnimationFrame(raf);resizeObserver?.disconnect()})
+onBeforeUnmount(() => {images.destroy();videos.destroy();offlineVideos.destroy();endPan();window.removeEventListener('blur',cancelPan);pointerUp({type:'pointercancel'});endNudge();window.removeEventListener('keyup',nudgeUp);window.removeEventListener('blur',endNudge);document.removeEventListener('pointermove',trackMouse);document.removeEventListener('pointerout',clearMouse);imageRequest++;backgroundImage=null;cancelAnimationFrame(raf);resizeObserver?.disconnect()})
 </script>
 <style scoped>
 .scene-preview { flex:1; min-height:220px; display:flex; flex-direction:column; background:var(--editor-bg); overflow:hidden; position:relative; }
 .scene-preview.preview-fullscreen { position:fixed; inset:0; width:100vw; height:100dvh; min-height:0; z-index:10000; background:#000; }
 .preview-fullscreen .preview-tools,.preview-fullscreen .selection-tools,.preview-fullscreen .selection-outline,.preview-fullscreen .canvas-guide { display:none; }
 .preview-fullscreen .preview-viewport { padding:0; overflow:hidden; }
+.preview-compact .preview-tools,.preview-compact .selection-tools,.preview-compact .text-canvas-tools,.preview-compact .selection-outline,.preview-compact .canvas-guide { display:none; }
+.preview-compact .preview-viewport { padding:6px; overflow:hidden; pointer-events:none; }
 .fullscreen-controls { position:absolute; z-index:5; bottom:18px; left:50%; transform:translateX(-50%); display:flex; flex-wrap:wrap; width:min(720px,calc(100% - 32px)); box-sizing:border-box; gap:12px; align-items:center; padding:8px 12px; border-radius:10px; background:rgba(20,20,20,.85); color:#fff; }
 .fullscreen-controls button { font:inherit; color:#fff; background:#333; border:1px solid #666; border-radius:6px; padding:7px 12px; cursor:pointer; white-space:nowrap; }
 .fullscreen-controls button:focus-visible { outline:2px solid #fff; outline-offset:2px; }
@@ -414,6 +482,9 @@ onBeforeUnmount(() => {images.destroy();videos.destroy();endPan();window.removeE
 .selection-outline .rotate-handle { top:10px; left:calc(50% - 10px); width:20px; height:20px; border-radius:50%!important; cursor:grab!important; line-height:18px; font-size:14px; }.rotation-stem { position:absolute; left:50%; top:0; height:10px; border-left:1px solid var(--editor-focus); }
 .empty-scene { position:absolute; inset:0; display:grid; place-items:center; pointer-events:none; color:white; text-shadow:0 1px 3px black; }
 .scene-preview { background:var(--editor-bg); }
+.text-canvas-tools { display:flex; align-items:center; flex-wrap:wrap; gap:6px; padding:6px 12px; flex-shrink:0; background:var(--editor-panel); color:var(--editor-text); font-size:11px; }.text-canvas-tools small { color:var(--editor-muted); }
+.selection-outline .text-width-handle { height:26px; top:calc(50% - 13px); border-radius:5px!important; background:var(--editor-accent)!important; }
+.canvas-text-editor { position:absolute; z-index:8; left:12px; top:96px; width:min(480px,calc(100% - 24px)); box-sizing:border-box; padding:12px; border:1px solid var(--editor-focus); border-radius:10px; background:var(--editor-panel); color:var(--editor-text); box-shadow:0 6px 24px #0003; font-size:12px; }.canvas-text-editor label { display:flex; flex-direction:column; gap:6px; }.canvas-text-editor textarea { width:100%; box-sizing:border-box; min-height:100px; max-height:220px; resize:vertical; padding:8px; border:1px solid var(--editor-border); border-radius:6px; background:var(--editor-soft); color:inherit; font:inherit; line-height:1.6; }.canvas-text-editor>div { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:8px; }.canvas-text-editor small { flex:1; color:var(--editor-muted); }.canvas-text-editor button { cursor:pointer; }
 .preview-viewport { padding:12px; }
 .scene-stage canvas { border-radius:0; }
 .scene-stage { border-radius:0; box-shadow:0 2px 12px #503b4610; }

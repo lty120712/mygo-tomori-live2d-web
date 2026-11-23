@@ -4,7 +4,7 @@
     <div v-show="open" class="library-body">
       <header><div><small>ASSETS</small><h3>素材库</h3></div><button class="collapse-trigger" aria-label="收起素材库" title="收起素材库，为画布留出空间" @click="emit('toggle')">‹</button></header>
       <nav class="asset-tabs" aria-label="素材分类">
-        <button :aria-current="activeTab==='text' ? 'page' : undefined" @click="switchTab('text')">文字<span>{{TEXT_PRESETS.length}}</span></button>
+        <button :aria-current="activeTab==='text' ? 'page' : undefined" @click="switchTab('text')">文字<span>{{TEXT_PRESETS.length+customPresets.length}}</span></button>
         <button :aria-current="activeTab==='model' ? 'page' : undefined" @click="switchTab('model')">模型<span>{{ models.length }}</span></button>
         <button :aria-current="activeTab==='image' ? 'page' : undefined" @click="switchTab('image')">图片<span>{{ assets.filter(a=>a.kind==='image').length }}</span></button>
         <button :aria-current="activeTab==='audio' ? 'page' : undefined" @click="switchTab('audio')">音频<span>{{ assets.filter(a=>a.kind==='audio').length }}</span></button>
@@ -37,6 +37,10 @@
             <span v-else class="text-preset-preview" :style="{fontFamily:preset.style.fontFamily,fontWeight:preset.style.bold ? 'bold' : 'normal'}">文字 Aa</span>
             <strong>{{preset.name}}</strong><small>{{preset.description}}</small><span class="add-mark">＋</span>
           </button>
+          <div v-for="preset in customPresets" :key="preset.id" class="custom-text-preset">
+            <button class="text-preset" :disabled="disabled" :aria-label="'添加'+preset.name" @click="emit('add-text',preset.id)"><strong>{{preset.name}}</strong><small>自定义文字样式 · {{preset.style.layout==='dialogue' ? '对白框' : '普通文字'}}</small><span class="add-mark">＋</span></button>
+            <button :disabled="disabled || presetBusy" :aria-label="'删除文字预设 '+preset.name" title="仅移除预设，不影响工程中的片段" @click="emit('remove-text-preset',preset.id)">删除预设</button>
+          </div>
         </div>
         <footer><span class="hint-dot"></span>文字可重复添加，内容与样式随工程保存</footer>
       </template>
@@ -72,8 +76,8 @@ import ModelPortrait from './ModelPortrait.vue'
 import { describeModel, filterModelLibrary } from '../modelLibrary.js'
 import { assetStore } from '../assetStore.js'
 import { TEXT_PRESETS } from '../textPresets.js'
-const props = defineProps({ models: { type: Array, default: () => [] }, clips: { type: Array, default: () => [] }, audioClips: { type: Array, default: () => [] }, backgroundClips: { type: Array, default: () => [] }, open: Boolean, disabled: Boolean })
-const emit = defineEmits(['toggle', 'add', 'add-image', 'background-image', 'add-audio', 'add-video', 'add-text', 'batch-text'])
+const props = defineProps({ models: { type: Array, default: () => [] }, clips: { type: Array, default: () => [] }, audioClips: { type: Array, default: () => [] }, backgroundClips: { type: Array, default: () => [] }, customPresets:{type:Array,default:()=>[]},presetBusy:Boolean,open: Boolean, disabled: Boolean })
+const emit = defineEmits(['toggle', 'add', 'add-image', 'background-image', 'add-audio', 'add-video', 'add-text', 'batch-text','remove-text-preset'])
 const referenced = asset => [...props.clips, ...props.backgroundClips, ...props.audioClips].some(c => c.assetId === asset.id)
 const activeTab = ref('model')
 const assets = ref([])
@@ -160,5 +164,21 @@ footer { display:flex; align-items:center; gap:6px; padding:14px 15px; font-size
 .asset-rail { display:flex; flex-direction:column; align-items:center; gap:14px; padding-top:20px; }.rail-trigger { display:flex; flex-direction:column; align-items:center; gap:7px; font-size:10px!important; padding:8px!important; }.rail-trigger svg { width:21px; height:21px; stroke:currentColor; fill:none; stroke-width:1.5; }
 .library-empty { display:flex; flex-direction:column; align-items:center; gap:12px; padding:30px 10px; color:var(--editor-muted); font-size:12px; }.asset-library .library-empty button { color:var(--editor-accent)!important; border:1px solid var(--editor-border)!important; background:var(--editor-accent-soft)!important; border-radius:8px!important; }
 .asset-library button:focus-visible { outline:2px solid var(--editor-focus); outline-offset:2px; }
+.library-body>header { padding:12px; }
+.library-body>header h3 { font-size:14px; margin:2px 0; }
+.library-body>header small { font-size:9px; letter-spacing:1.5px; color:var(--editor-muted); }
+.asset-tabs { gap:2px; padding:0 10px 8px; flex-wrap:nowrap; }
+.asset-tabs button { min-width:0; gap:2px; font-size:11px; padding:5px 3px; border-radius:4px; }
+.asset-tabs button[aria-current=page] { color:var(--editor-focus); background:var(--editor-accent-soft); }
+.asset-tabs button span { display:none; }
+.library-filters { padding:0 10px 8px; }
+.library-filters label { margin-bottom:7px; }
+.asset-library input,.asset-library select { padding:5px 7px; border-radius:4px; font-size:11px; }
+.asset-library .search-field input { padding-left:28px; }
+.search-field svg { top:7px; left:8px; }
+.library-results { padding:6px; }
+.asset-library .library-model { padding:7px!important; gap:8px; border-radius:5px!important; margin-bottom:2px; }
+.model-copy strong { font-size:12px; }.model-copy { gap:3px; }
+footer { padding:8px 10px; }
 @media(max-width:800px) { .asset-library:not(.collapsed) { position:absolute; left:0; top:0; bottom:0; z-index:5; box-shadow:12px 0 32px #080b1828; width:min(280px,calc(100% - 52px)); }.asset-library.collapsed { width:44px; } }
 </style>

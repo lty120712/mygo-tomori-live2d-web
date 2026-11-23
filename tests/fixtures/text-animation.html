@@ -1,0 +1,26 @@
+<!doctype html><html lang="zh-CN"><meta charset="UTF-8"><title>文字动画隔离验证</title>
+<style>:root{font:13px system-ui;--editor-panel:#fff;--editor-soft:#f6f3f5;--editor-text:#342e35;--editor-muted:#817580;--editor-accent:#743a52;--editor-border:#ded5dc;--editor-focus:#ac7991;--editor-accent-soft:#f3e4eb;--editor-hover:#f6eaf0;--editor-radius:6px}body{margin:12px;background:#f6f3f5;color:#342e35}main{min-width:1000px}header{display:flex;gap:8px;align-items:center;flex-wrap:wrap}#layout{display:grid;grid-template-columns:minmax(500px,1fr) 310px;gap:12px}.preview{display:flex;flex-direction:column;height:360px;background:#7a8c9f}aside{max-height:85vh;overflow:auto;background:white;padding:12px}button{cursor:pointer}pre{font-size:11px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:130px;overflow:auto}</style><div id="app"></div><script type="module">
+import {createApp,h,ref} from 'vue'
+import {useSceneEditor} from '../../src/composables/useSceneEditor.js'
+import {createLocalStore,memoryDocumentBackend,SCENE_KEY} from '../../src/localStore.js'
+import {createProject} from '../../src/sceneProject.js'
+import {createTextClip} from '../../src/mediaTracks.js'
+import {applyTextPreset} from '../../src/textPresets.js'
+import {sampleTextAnimation} from '../../src/textAnimation.js'
+import TextInspector from '../../src/components/TextInspector.vue'
+import SceneCanvas from '../../src/components/SceneCanvas.vue'
+const store=createLocalStore(memoryDocumentBackend()),p=createProject(),clip=applyTextPreset(createTextClip(0,5,0),'dialogue-light')
+clip.text='清晨的阳光，文字逐字出现。\n换行与对白框保持稳定。';clip.speaker='旁白';clip.textStyle.enterAnimation='typewriter';clip.textStyle.enterDuration=2;clip.textStyle.exitAnimation='fade';clip.textStyle.exitDuration=1
+p.imageClips=[clip]
+await store.set(SCENE_KEY,p)
+createApp({setup(){const e=useSceneEditor({store}),proof=ref('')
+function compare(){const canvas=e.sceneCanvas.value.getCanvas(),preview=document.querySelector('canvas[aria-label="场景合成画布"]');proof.value=canvas.toDataURL()===preview.toDataURL() ? '预览与导出帧像素一致' : '像素不一致'}
+return ()=>h('main',[
+  h('header',[h('p','隔离验证 · 内存工程，不修改用户数据'),...[0,.5,1,2,4.5].map(t=>h('button',{onClick:()=>e.seek(t)},t+' 秒')),h('button',{onClick:()=>e.playing.value ? e.pause() : e.play()},'播放 / 暂停'),h('button',{onClick:()=>{e.seek(1);e.split()}},'在 1 秒切割'),h('button',{onClick:()=>e.selectCanvas(e.project.imageClips.map(c=>c.id),e.project.imageClips[0].id)},'多选文字'),h('button',{onClick:e.undo,disabled:!e.canUndo.value},'撤销'),h('button',{onClick:e.redo,disabled:!e.canRedo.value},'重做'),h('button',{onClick:compare},'验证预览与导出帧')]),
+  h('p',{id:'proof'},proof.value),h('p',{id:'time'},'播放头：'+e.time.value.toFixed(3)+' 秒'),
+  h('div',{id:'layout'},[
+    h('section',[h('div',{class:'preview'},[h(SceneCanvas,{clips:e.allClips.value,background:'#7a8c9f',time:e.time.value,duration:e.project.duration,fps:e.project.fps,aspectRatio:'16:9',selected:e.selected.value,selectedIds:e.canvasSelection.value,runtimes:e.runtimes,playing:e.playing.value,ref:e.sceneCanvas})]),h('pre',{id:'result'},JSON.stringify(e.project.imageClips.map(c=>({start:c.start,duration:c.duration,offset:c.offset,textAnimationEnd:c.textAnimationEnd,enter:c.textStyle.enterAnimation,exit:c.textStyle.exitAnimation,enterDuration:c.textStyle.enterDuration,sample:sampleTextAnimation(c,e.time.value)}))))]),
+    h('aside',e.textInspectorClip.value ? h(TextInspector,{clip:e.textInspectorClip.value,clips:e.textSelection.value,customPresets:e.textPresets.presets.value,presetBusy:e.textPresets.busy.value,onEdit:e.editText,onBeginEdit:e.beginEdit,onEndEdit:e.endEdit,onSelectTrack:e.selectTrackText,onSavePreset:e.saveTextPreset}) : null),
+  ]),
+])}}).mount('#app')
+</script></html>

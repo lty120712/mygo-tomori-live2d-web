@@ -1,0 +1,19 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>导出设置与准备验证</title>
+<style>:root{font:14px system-ui;--editor-panel:#fff;--editor-soft:#f4edf1;--editor-text:#342e35;--editor-muted:#716371;--editor-border:#d5c7d1;--editor-accent:#925c81}body{margin:32px;background:#f8f4f6;color:var(--editor-text)}main{max-width:900px;margin:auto}button{padding:8px 16px;margin:8px;cursor:pointer}pre{padding:16px;background:white}</style><div id="app"></div><script type="module">
+import {createApp,h,ref,computed,onMounted,onBeforeUnmount} from 'vue'
+import {localStore} from '../../src/localStore.js'
+import {useRecorder} from '../../src/composables/useRecorder.js'
+import {useExportPreferences} from '../../src/composables/useExportPreferences.js'
+import VideoExportDialog from '../../src/components/VideoExportDialog.vue'
+import VideoExportStatus from '../../src/components/VideoExportStatus.vue'
+const key='qa-export-preferences',store={get:()=>localStore.get(key),set:(_key,value)=>localStore.set(key,value)}
+createApp({setup(){const recorder=useRecorder(),dialog=ref(null),message=ref(''),count=ref(0),prefs=useExportPreferences(recorder,store)
+recorder.preferences=prefs
+const busy=computed(()=>recorder.isPreparing.value || recorder.isRecording.value || recorder.isExporting.value)
+const canvas=document.createElement('canvas');canvas.width=1920;canvas.height=1080;const ctx=canvas.getContext('2d');ctx.fillStyle='#426a82';ctx.fillRect(0,0,1920,1080);ctx.fillStyle='#fff';ctx.font='70px sans-serif';ctx.fillText('导出准备验证',650,550)
+async function start(){const job=recorder.beginPreparation();if(!job)return;message.value='';try{await new Promise(resolve=>setTimeout(resolve,3000));if(job.signal.aborted)return;job.finish();await recorder.exportOffline({duration:1,fps:30,frameAt:async()=>{count.value++;return canvas},renderAudio:async()=>null})}finally{job.finish()}}
+function cancel(){recorder.cancel();message.value='已取消，未下载文件'}
+async function reset(){await prefs.flush();prefs.destroy();await localStore.remove(key);message.value='测试设置已清理'}
+onMounted(prefs.load);onBeforeUnmount(()=>{prefs.destroy();recorder.destroy()})
+return()=>h('main',[h('h2','导出设置 · 刷新记忆与准备阶段'),h('p','只使用统一 IndexedDB 中独立的验证偏好记录，不读取或修改用户工程。准备阶段固定等待三秒，便于检查取消。'),h('button',{disabled:busy.value,onClick:()=>dialog.value.open()},'导出视频'),h('button',{disabled:busy.value,onClick:reset},'清理验证设置'),h(VideoExportDialog,{ref:dialog,recorder,aspectRatio:'16:9',fps:30,duration:1,disabled:busy.value,onStart:start}),h(VideoExportStatus,{recorder,time:0,duration:1,onCancel:cancel}),h('pre',JSON.stringify({format:recorder.format.value,resolution:recorder.resolution.value,quality:recorder.quality.value,method:recorder.method.value,preparing:recorder.isPreparing.value,processing:recorder.isExporting.value,renderedFrames:count.value,message:message.value,error:recorder.error.value},null,2))])}}).mount('#app')
+</script></html>

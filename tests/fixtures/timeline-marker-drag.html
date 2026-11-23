@@ -1,0 +1,41 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>标记拖动与吸附回归</title>
+<style>
+:root{font:14px system-ui;--editor-panel:#f8f5f2;--editor-soft:#eee8e7;--editor-text:#342c30;--editor-muted:#786870;--editor-border:#dcd2d5;--editor-accent:#743a52;--editor-focus:#a76581;--editor-key:#805e18}
+body{margin:20px;background:#f8f4f6;color:#342c30}main{max-width:1100px;margin:auto}header{display:flex;align-items:center;gap:12px;flex-wrap:wrap}button{padding:7px;cursor:pointer}pre{padding:12px;background:white;white-space:pre-wrap}.area{margin:16px 0}.multi-timeline{height:460px!important}
+</style><div id="app"></div><script type="module">
+import {createApp,h} from 'vue'
+import {useSceneEditor} from '../../src/composables/useSceneEditor.js'
+import {createLocalStore,memoryDocumentBackend,SCENE_KEY} from '../../src/localStore.js'
+import {createAssetStore,memoryBackend} from '../../src/assetStore.js'
+import {createProject,createClip} from '../../src/sceneProject.js'
+import {createTextClip,createImageClip,createVideoClip,createColorBackgroundClip,createAudioClip} from '../../src/mediaTracks.js'
+import models from 'virtual:model-manifest'
+import MultiTimeline from '../../src/components/MultiTimeline.vue'
+import '../../src/editorTheme.css'
+const store=createLocalStore(memoryDocumentBackend()),project=createProject(),asset={id:'marker-fixture-image',name:'图片',width:320,height:180}
+project.duration=20
+project.markers=[{id:'cue',name:'剪辑点',time:8,color:'#6488dd'},{id:'next',name:'转场',time:12,color:'#d99b35'}]
+project.clips=[createClip(models[0],1,2,0)]
+project.imageClips=[createImageClip(asset,2,2,1),createVideoClip({...asset,id:'marker-fixture-video',name:'视频'},3,2,2),createTextClip(4,2,3)]
+project.backgroundClips=[createColorBackgroundClip('#d9bce7',1,2)]
+project.audioClips=[createAudioClip({id:'marker-fixture-audio',name:'音频'},2,2)]
+project.audioClips[0].offset=3
+await store.set(SCENE_KEY,project)
+createApp({setup(){
+  const e=useSceneEditor({store,assets:createAssetStore(memoryBackend())})
+  return()=>h('main',[
+    h('h2','标记拖动与跨轨吸附'),h('p','隔离内存工程；只测试时间线，不加载模型或媒体。拖动时数据保持原位，松开后一步保存，Esc 取消。'),
+    h('header',[
+      h('button',{onClick:e.undo,disabled:!e.canUndo.value},'撤销'),h('button',{onClick:e.redo,disabled:!e.canRedo.value},'重做'),
+      h('button',{onClick:()=>e.seek(0)},'播放头归零'),
+      h('label',['FPS',h('select',{'aria-label':'测试 FPS',value:e.project.fps,onChange:event=>e.changeFps(Number(event.target.value))},[24,30,60].map(n=>h('option',{value:n},n)))])
+    ]),
+    h('div',{class:'area'},[h(MultiTimeline,{
+      ref:e.sceneTimeline,clips:e.allClips.value,markers:e.project.markers,backgroundClips:e.project.backgroundClips,audioClips:e.project.audioClips,
+      duration:e.project.duration,fps:e.project.fps,time:e.time.value,labels:e.paramLabels.value,pose:e.selectedPose.value,runtimes:e.runtimes,transformFields:e.transformFields,disabled:e.locked.value,
+      onMarkerEdit:e.editMarkers,onSeek:e.seek,onBatchClips:e.batchClips,onEditClip:e.editClip,onBackgroundEdit:e.editBackground,onAudioEdit:e.editAudioClip,onBeginEdit:e.beginEdit,onEndEdit:e.endEdit
+    })]),
+    h('pre',{'aria-label':'工程状态'},JSON.stringify({markers:e.project.markers,visuals:e.allClips.value.map(c=>({name:c.name,start:c.start,duration:c.duration})),background:e.project.backgroundClips.map(c=>({start:c.start,duration:c.duration})),audio:e.project.audioClips.map(c=>({start:c.start,duration:c.duration,offset:c.offset})),time:e.time.value,fps:e.project.fps,message:e.message.value},null,2))
+  ])
+}}).mount('#app')
+</script></html>

@@ -1,19 +1,11 @@
 import { ref } from 'vue'
 import { DEFAULT_BG_COLOR } from '../background.js'
 import { recordingFormats } from '../recordingFormats.js'
+import { videoExportSettings } from '../videoExportSettings.js'
+import {encodeTimeline,checkExportAbort} from '../offlineVideoExport.js'
 
 /** 导出视频的帧率 */
 const RECORD_FPS = 30
-/** 竖屏导出的固定尺寸（9:16） */
-const PORTRAIT_W = 1080
-const PORTRAIT_H = 1920
-/** 跟随画布比例时，最长边不超过这个值 */
-const MAX_LONG_EDGE = 1920
-
-/** 视频编码器要求宽高为偶数，否则部分浏览器会直接报错 */
-function toEven(value) {
-  return Math.max(2, Math.round(value / 2) * 2)
-}
 
 function supportsCaptureStream() {
   return typeof HTMLCanvasElement !== 'undefined' &&
@@ -21,15 +13,23 @@ function supportsCaptureStream() {
 }
 
 export function useRecorder(options = {}) {
+  const encode=options.encode || encodeTimeline
+  const mux=options.mux || ((video,audio,settings)=>import('../mp4Transcoder.js').then(m=>m.muxTimelineMp4(video,audio,settings)))
   const convert = options.convert || ((blob, settings) => import('../mp4Transcoder.js').then(m=>m.transcodeMp4(blob,settings)))
   const formats = recordingFormats()
   const format = ref(formats.find(f => f.id === 'mp4')?.id || formats[0]?.id || '')
   const isRecording = ref(false)
+  const isPreparing = ref(false)
+  const range=ref(null)
   const isExporting = ref(false)
   const progress = ref(0)
   const error = ref('')
+  const resolution = ref('1080'), quality = ref('high')
+  const offlineAvailable=typeof VideoEncoder!=='undefined' && typeof VideoFrame!=='undefined'
+  const method=ref(offlineAvailable?'offline':'realtime'),phase=ref('')
   let exportController = null
   let destroyed = false
+  let operation = 0
   const canRecord = ref(
     typeof MediaRecorder !== 'undefined' && supportsCaptureStream() && formats.length > 0
   )
@@ -57,21 +57,6 @@ export function useRecorder(options = {}) {
   /** 音频轨道混音由 audioScheduler 的 masterGain 提供，这里只把它的音轨并进导出流。 */
   function audioTrackOf(audioStream) {
     return audioStream?.getAudioTracks?.()[0] || null
-  }
-
-  /**
-   * 计算导出分辨率。
-   * - canvas：跟随画布比例，所见即所得
-   * - portrait：固定 9:16，画面中心裁切后铺满
-   */
-  function resolveOutputSize(sourceWidth, sourceHeight, nextMode) {
-    if (nextMode === 'portrait') {
-      return { width: PORTRAIT_W, height: PORTRAIT_H }
-    }
-    const sw = sourceWidth || PORTRAIT_W
-    const sh = sourceHeight || PORTRAIT_H
-    const scale = Math.min(1, MAX_LONG_EDGE / Math.max(sw, sh))
-    return { width: toEven(sw * scale), height: toEven(sh * scale) }
   }
 
   /**
@@ -129,8 +114,11 @@ export function useRecorder(options = {}) {
   }
 
   function start(sourceCanvas, audioStream, nextMode = 'canvas', getBackground = null, getViewRect = null, fps = RECORD_FPS) {
-    if (!canRecord.value || isRecording.value || isExporting.value || !sourceCanvas) return false
+    if (destroyed || !canRecord.value || isPreparing.value || isRecording.value || isExporting.value || !sourceCanvas) return false
+    const current=++operation
     error.value = ''
+    phase.value='recording'
+    progress.value = 0
 
     mode = nextMode === 'portrait' ? 'portrait' : 'canvas'
     readBackground = typeof getBackground === 'function' ? getBackground : null
@@ -138,7 +126,8 @@ export function useRecorder(options = {}) {
     const mixedTrack = audioTrackOf(audioStream)
 
     const win = viewWindow(sourceCanvas)
-    const size = resolveOutputSize(win.sw, win.sh, mode)
+    const settings=videoExportSettings({resolution:resolution.value,quality:quality.value,fps,portrait:mode==='portrait' || win.sh>win.sw})
+    const size = {width:settings.width,height:settings.height}
     outCvs = document.createElement('canvas')
     outCvs.width = size.width
     outCvs.height = size.height
@@ -153,40 +142,49 @@ export function useRecorder(options = {}) {
       if (!selectedFormat) throw new Error('当前浏览器不支持所选视频格式')
       const mimeType = selectedFormat.mimeType
       chunks = []
-      mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
+      mediaRecorder = new MediaRecorder(stream, { ...(mimeType ? {mimeType}:{}),videoBitsPerSecond:settings.videoBitsPerSecond,audioBitsPerSecond:settings.audioBitsPerSecond })
+      const recording=mediaRecorder
       mediaRecorder.ondataavailable = (e) => {
+        if(current!==operation)return
         if (e.data && e.data.size > 0) chunks.push(e.data)
       }
       mediaRecorder.onerror = (e) => {
-        console.error('录制失败:', e?.error || e)
-        stop()
+        if(current!==operation)return
+        cancel()
+        error.value='视频导出失败：'+(e?.error?.message || '录制中断，请重试或降低分辨率')
       }
       mediaRecorder.onstop = async () => {
-        const blob = new Blob(chunks, { type: mediaRecorder.mimeType || mimeType })
+        if(current!==operation)return
+        isRecording.value=false
+        const blob = new Blob(chunks, { type: recording.mimeType || mimeType })
         chunks = []
         cleanup()
+        mediaRecorder=null
         isExporting.value = true
-        exportController = new AbortController()
+        phase.value='muxing'
+        const controller = new AbortController()
+        exportController = controller
         progress.value = 0
         try {
           if(blob.size){
-            const actualType=blob.type.split(';')[0]
-            const output=selectedFormat.id==='mp4' && actualType!=='video/mp4'
-              ? await convert(blob,{progress:value=>progress.value=value,signal:exportController.signal}) : blob
-            if(!destroyed)downloadBlob(output, selectedFormat.id)
+            // Native MP4 also needs a complete seek index; never download fragmented recorder chunks directly.
+            const output=selectedFormat.id==='mp4'
+              ? await convert(blob,{progress:value=>{if(current===operation)progress.value=Math.max(progress.value,Math.max(0,Math.min(1,Number(value)||0)))},signal:controller.signal,videoBitsPerSecond:settings.videoBitsPerSecond}) : blob
+            if(!destroyed && current===operation && !controller.signal.aborted)downloadBlob(output, selectedFormat.id)
+          }else{
+            throw new Error('没有生成有效视频，请重试')
           }
         } catch(e) {
-          if(!destroyed)error.value='视频导出失败：'+(e?.message || String(e))
+          if(!destroyed && current===operation)error.value='视频导出失败：'+(e?.message || String(e))
         } finally {
-          exportController=null
-          isExporting.value=false
+          if(current===operation){exportController=null;isExporting.value=false}
         }
       }
-      // 分片写入，长视频不会一直堆在内存里
+      // 分片采集，停止时合并为完整文件。
       mediaRecorder.start(1000)
     } catch (err) {
-      console.error('无法开始录制:', err)
-      cleanup()
+      cancel()
+      error.value='无法开始录制：'+(err?.message || String(err))
       return false
     }
 
@@ -228,10 +226,16 @@ export function useRecorder(options = {}) {
     outCtx = null
   }
 
-  function destroy() {
-    destroyed = true
+  function cancel() {
+    ++operation
     exportController?.abort()
+    exportController=null
     isRecording.value = false
+    isPreparing.value = false
+    isExporting.value = false
+    progress.value = 0
+    phase.value=''
+    range.value=null
     cleanup()
     if (mediaRecorder) {
       mediaRecorder.ondataavailable = null
@@ -243,16 +247,59 @@ export function useRecorder(options = {}) {
     chunks = []
   }
 
+  function destroy() {
+    destroyed = true
+    cancel()
+  }
+
+  async function exportOffline({duration,fps,portrait,frameAt,renderAudio}){
+    if(destroyed || isPreparing.value || isRecording.value || isExporting.value)return false
+    const current=++operation,controller=new AbortController()
+    exportController=controller;isExporting.value=true;phase.value='rendering';progress.value=0;error.value=''
+    const settings=videoExportSettings({resolution:resolution.value,quality:quality.value,fps,portrait})
+    const report=value=>{if(current===operation)progress.value=value}
+    try{
+      const video=await encode({...settings,duration,frameAt,signal:controller.signal,progress:report})
+      checkExportAbort(controller.signal)
+      phase.value='audio';progress.value=0
+      const audio=await renderAudio(controller.signal,report)
+      checkExportAbort(controller.signal)
+      phase.value='muxing';progress.value=0
+      const blob=await mux(video,audio,{fps:settings.fps,signal:controller.signal,progress:report})
+      checkExportAbort(controller.signal)
+      if(!destroyed && current===operation && !controller.signal.aborted)downloadBlob(blob,'mp4')
+      return true
+    }catch(e){if(!destroyed && current===operation)error.value='视频导出失败：'+(e?.message || String(e));return false}
+    finally{if(current===operation){isExporting.value=false;exportController=null;phase.value=''}}
+  }
+
+  function beginPreparation(){
+    if(destroyed || isPreparing.value || isRecording.value || isExporting.value)return null
+    const current=++operation,controller=new AbortController()
+    exportController=controller;isPreparing.value=true;phase.value='preparing';progress.value=0;error.value=''
+    return {signal:controller.signal,finish(){if(current===operation){isPreparing.value=false;exportController=null;phase.value=''}}}
+  }
+
   return {
     isRecording,
+    isPreparing,
+    range,
     isExporting,
     progress,
     error,
     canRecord,
     formats,
     format,
+    resolution,
+    quality,
+    method,
+    phase,
+    offlineAvailable,
+    exportOffline,
+    beginPreparation,
     start,
     stop,
+    cancel,
     destroy,
   }
 }

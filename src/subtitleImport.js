@@ -92,16 +92,16 @@ export function planTextBatch(clips,cues,{duration=10,fps=30,selectedTrack}={}){
   for(const entry of entries)entry.track=entry.track<0 ? -entry.track-1 : entry.track+newTracks
   return {entries,shift:newTracks,newTracks,projectDuration:Math.max(duration,...entries.map(c=>c.start+c.duration))}
 }
-export function buildTextBatch(plan,{presetId='subtitle',template=null,canvas={width:960,height:540}}={}){
+export function buildTextBatch(plan,{presetId='subtitle',template=null,canvas={width:960,height:540},customPresets=[]}={}){
   if(plan.error)return []
   return plan.entries.map((entry,i)=>{
     const clip=createTextClip(entry.start,entry.duration,entry.track)
     if(template){
       clip.textStyle=normalizeTextStyle(template.textStyle);clip.speaker=normalizeSpeaker(template.speaker)
       clip.transform=JSON.parse(JSON.stringify({...clip.transform,...template.transform}))
-    }else applyTextPreset(clip,presetId,canvas)
+    }else applyTextPreset(clip,presetId,canvas,customPresets)
     clip.text=entry.text;clip.name=`字幕 ${i+1}`;Object.assign(clip,entry.layer)
-    if(!template && (clip.textStyle.layout==='dialogue' || textPreset(presetId).placement==='bottom'))placeTextAtBottom(clip,canvas)
+    if(!template && (clip.textStyle.layout==='dialogue' || textPreset(presetId,customPresets).placement==='bottom'))placeTextAtBottom(clip,canvas)
     return clip
   })
 }

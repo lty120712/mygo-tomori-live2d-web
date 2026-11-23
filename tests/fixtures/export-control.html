@@ -1,0 +1,18 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>视频导出控制验证</title>
+<style>:root{font:14px system-ui;--editor-panel:#fff;--editor-soft:#f4edf1;--editor-text:#342e35;--editor-muted:#716371;--editor-border:#d5c7d1;--editor-accent:#925c81}body{margin:24px;background:#f8f4f6;color:var(--editor-text)}main{max-width:1000px;margin:auto}button{padding:8px 16px;margin:8px;cursor:pointer}.preview{height:420px;display:flex}.state{padding:12px;background:#fff;white-space:pre-wrap}</style>
+<div id="app"></div><script type="module">
+import {createApp,h,ref} from 'vue'
+import {useSceneEditor} from '../../src/composables/useSceneEditor.js'
+import {createLocalStore,memoryDocumentBackend,SCENE_KEY} from '../../src/localStore.js'
+import {createProject} from '../../src/sceneProject.js'
+import {createTextClip} from '../../src/mediaTracks.js'
+import SceneCanvas from '../../src/components/SceneCanvas.vue'
+import VideoExportDialog from '../../src/components/VideoExportDialog.vue'
+import VideoExportStatus from '../../src/components/VideoExportStatus.vue'
+const store=createLocalStore(memoryDocumentBackend()),project=createProject(),text=createTextClip(0,20)
+text.text='视频导出进度验证';project.duration=20;project.background='#426a82';project.imageClips=[text]
+await store.set(SCENE_KEY,project)
+createApp({setup(){const e=useSceneEditor({store}),dialog=ref(null)
+function cancel(){e.cancelExport();e.message.value='已取消视频导出，未下载文件'}
+return()=>h('main',[h('h2','视频导出 · 进度与取消'),h('p','隔离内存工程，不读取或改写用户工程。'),h('button',{disabled:e.locked.value,onClick:()=>dialog.value.open()},'导出视频'),h('button',{disabled:e.locked.value,onClick:()=>e.editClip(e.project.imageClips[0].id,{duration:1})},'设为一秒'),h('button',{disabled:e.locked.value,onClick:()=>e.changeAspectRatio(e.project.aspectRatio==='9:16'?'16:9':'9:16')},'切换横竖屏'),h(VideoExportDialog,{ref:dialog,recorder:e.recorder,aspectRatio:e.project.aspectRatio,fps:e.project.fps,duration:e.project.duration,disabled:e.locked.value,onStart:e.record}),h(VideoExportStatus,{recorder:e.recorder,time:e.time.value,duration:e.project.duration,onCancel:cancel,onFinish:e.record}),h('div',{class:'preview'},[h(SceneCanvas,{clips:e.allClips.value,background:e.project.background,time:e.time.value,duration:e.project.duration,fps:e.project.fps,aspectRatio:e.project.aspectRatio,playing:e.playing.value,recording:e.recorder.isRecording.value,runtimes:e.runtimes,ref:e.sceneCanvas})]),h('pre',{class:'state'},JSON.stringify({recording:e.recorder.isRecording.value,processing:e.recorder.isExporting.value,playing:e.playing.value,locked:e.locked.value,time:e.time.value,duration:e.project.duration,message:e.message.value,error:e.recorder.error.value},null,2))])}}).mount('#app')
+</script></html>

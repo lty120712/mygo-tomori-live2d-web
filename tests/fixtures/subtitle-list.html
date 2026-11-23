@@ -1,0 +1,32 @@
+<!doctype html><html lang="zh-CN"><meta charset="UTF-8"><title>字幕列表隔离验证</title>
+<style>:root{font:13px system-ui;--editor-panel:#fff;--editor-soft:#f6f3f5;--editor-text:#342e35;--editor-muted:#817580;--editor-accent:#743a52;--editor-border:#ded5dc;--editor-focus:#ac7991;--editor-accent-soft:#f3e4eb;--editor-hover:#f6eaf0;--editor-radius:6px}body{margin:10px;background:#f6f3f5;color:#342e35}main{min-width:1000px}header{display:flex;align-items:center;gap:8px;flex-wrap:wrap}button{cursor:pointer}#grid{display:grid;grid-template-columns:minmax(350px,1fr) minmax(500px,1.3fr);gap:12px;align-items:start}.preview{display:flex;flex-direction:column;height:280px;background:#7a8c9f}pre{font-size:11px;white-space:pre-wrap;max-height:150px;overflow:auto}.subtitle-list{margin:0!important}.subtitle-rows{max-height:450px!important}</style><div id="app"></div><script type="module">
+import {createApp,h,ref} from 'vue'
+import {useSceneEditor} from '../../src/composables/useSceneEditor.js'
+import {createLocalStore,memoryDocumentBackend,SCENE_KEY} from '../../src/localStore.js'
+import {createProject} from '../../src/sceneProject.js'
+import {createTextClip} from '../../src/mediaTracks.js'
+import {applyTextPreset} from '../../src/textPresets.js'
+import {createTextPresetStore} from '../../src/textPresetStore.js'
+import SubtitleList from '../../src/components/SubtitleList.vue'
+import SceneCanvas from '../../src/components/SceneCanvas.vue'
+import MultiTimeline from '../../src/components/MultiTimeline.vue'
+const store=createLocalStore(memoryDocumentBackend()),p=createProject()
+p.imageClips=[
+  [4,0,'第三句，保留独立时间','角色三'],[0,0,'第一句，清晨的阳光','高松灯'],[2,1,'第二句，来自旁白','旁白'],
+].map(([start,track,text,speaker])=>{const c=applyTextPreset(createTextClip(start,2,track),'dialogue-dark');Object.assign(c,{text,speaker,layerName:track===0 ? '主字幕' : '旁白轨'});return c})
+await store.set(SCENE_KEY,p)
+await createTextPresetStore(store,{id:()=> 'fixture'}).save('测试红色字幕',{color:'#ff8800',fontSize:32})
+createApp({setup(){const e=useSceneEditor({store}),open=ref(true)
+return ()=>h('main',[
+  h('header',[h('p','隔离验证 · 使用内存数据库，不读写用户工程'),h('button',{onClick:e.undo,disabled:!e.canUndo.value},'撤销'),h('button',{onClick:e.redo,disabled:!e.canRedo.value},'重做'),h('button',{onClick:()=>e.changeLayerState(1,{layerLocked:!e.project.imageClips.find(c=>c.track===1).layerLocked})},'切换旁白轨锁定'),h('button',{onClick:()=>open.value=!open.value},'字幕列表')]),
+  h('p',{id:'message'},e.message.value),h('p',{id:'time'},'播放头：'+e.time.value.toFixed(3)+' 秒'),
+  h('div',{id:'grid'},[
+    h('section',[
+      h('div',{class:'preview'},[h(SceneCanvas,{clips:e.allClips.value,background:'#7a8c9f',time:e.time.value,duration:e.project.duration,fps:e.project.fps,aspectRatio:'16:9',selected:e.selected.value,selectedIds:e.canvasSelection.value,runtimes:e.runtimes,ref:e.sceneCanvas,onSelect:e.selectCanvas})]),
+      h(MultiTimeline,{clips:e.allClips.value,selected:e.selected.value,selectedId:e.selectedId.value,selectedIds:e.canvasSelection.value,duration:e.project.duration,fps:e.project.fps,time:e.time.value,labels:{},pose:e.selectedPose.value,runtimes:e.runtimes,transformFields:[],ref:e.sceneTimeline,onSelectionChange:e.selectTimeline,onSelect:id=>e.selectedId.value=id,onSeek:e.seek,onBatchClips:e.batchClips,onBeginEdit:e.beginEdit,onEndEdit:e.endEdit}),
+      h('pre',{id:'result'},JSON.stringify({selected:e.canvasSelection.value,clips:e.project.imageClips.map(c=>({id:c.id,text:c.text,speaker:c.speaker,start:c.start,fontSize:c.textStyle.fontSize,color:c.textStyle.color,locked:c.layerLocked}))})),
+    ]),
+    open.value ? h(SubtitleList,{clips:e.allClips.value,selectedIds:e.canvasSelection.value,customPresets:e.textPresets.presets.value,fps:e.project.fps,time:e.time.value,disabled:e.locked.value,onClose:()=>open.value=false,onActivate:e.activateSubtitle,onSelection:e.selectCanvas,onEdit:e.editSubtitle,onApplyStyle:e.applySubtitleStyle,onBeginEdit:e.beginEdit,onEndEdit:e.endEdit}) : null,
+  ]),
+])}}).mount('#app')
+</script></html>

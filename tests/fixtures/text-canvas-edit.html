@@ -1,0 +1,26 @@
+<!doctype html><html lang="zh-CN"><meta charset="UTF-8"><title>文字画布交互隔离验证</title>
+<style>:root{font:13px system-ui;--editor-panel:#fff;--editor-soft:#f6f3f5;--editor-text:#342e35;--editor-muted:#817580;--editor-accent:#743a52;--editor-border:#ded5dc;--editor-focus:#ac7991;--editor-accent-soft:#f3e4eb;--editor-hover:#f6eaf0;--editor-radius:6px}body{margin:12px;background:#f6f3f5;color:#342e35}main{min-width:1000px}header{display:flex;gap:8px;align-items:center;flex-wrap:wrap}#layout{display:grid;grid-template-columns:minmax(500px,1fr) 290px;gap:12px}.preview{height:480px;display:flex;flex-direction:column;background:#7a8c9f}aside{max-height:85vh;overflow:auto;background:white;padding:12px}button{cursor:pointer}pre{font-size:11px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:120px;overflow:auto}</style><div id="app"></div><script type="module">
+import {createApp,h} from 'vue'
+import {useSceneEditor} from '../../src/composables/useSceneEditor.js'
+import {createLocalStore,memoryDocumentBackend,SCENE_KEY} from '../../src/localStore.js'
+import {createProject} from '../../src/sceneProject.js'
+import {createTextClip} from '../../src/mediaTracks.js'
+import {applyTextPreset} from '../../src/textPresets.js'
+import SceneCanvas from '../../src/components/SceneCanvas.vue'
+import TextInspector from '../../src/components/TextInspector.vue'
+const store=createLocalStore(memoryDocumentBackend()),p=createProject(),clip=applyTextPreset(createTextClip(),'dialogue-light')
+clip.text='双击画布中的文字，直接编辑正文。拖动左右边缘调整文字框宽度，字号保持不变。';clip.textStyle.width=460;clip.transform.x=0;clip.transform.y=0;p.imageClips=[clip]
+await store.set(SCENE_KEY,p)
+createApp({setup(){const e=useSceneEditor({store})
+return ()=>h('main',[
+  h('header',[h('p','隔离验证 · 内存工程，不修改用户数据'),h('button',{onClick:e.undo,disabled:!e.canUndo.value},'撤销'),h('button',{onClick:e.redo,disabled:!e.canRedo.value},'重做'),h('button',{onClick:()=>e.editTransform('rotation',30)},'旋转 30 度'),h('button',{onClick:()=>e.changeLayerState(0,{layerLocked:!e.project.imageClips[0].layerLocked})},'切换图层锁定'),h('button',{onClick:()=>{e.toggleKey('@x',e.selectedPose.value.transform.x);e.toggleKey('@y',e.selectedPose.value.transform.y)}},'切换位置关键帧')]),
+  h('div',[
+    h('button',{onClick:()=>{e.editText({text:'滑入中的文字',textStyle:{layout:'plain',fontSize:20,width:300,enterAnimation:'slide-up',enterDuration:1}});e.seek(.1)}},'动画命中测试'),
+    h('button',{onClick:()=>e.autoTransform.value=!e.autoTransform.value},'切换自动关键帧'),
+  ]),
+  h('div',{id:'layout'},[
+    h('section',[h('div',{class:'preview'},[h(SceneCanvas,{clips:e.allClips.value,background:'#7a8c9f',time:e.time.value,duration:e.project.duration,fps:e.project.fps,aspectRatio:'16:9',selected:e.selected.value,selectedIds:e.canvasSelection.value,runtimes:e.runtimes,playing:e.playing.value,ref:e.sceneCanvas,onSelect:e.selectCanvas,onTextContent:e.editSubtitle,onTextWidth:e.resizeCanvasText,onTransform:e.transformModel,onMove:e.moveModel,onBeginEdit:e.beginEdit,onEndEdit:e.endEdit})]),h('pre',{id:'result'},JSON.stringify(e.project.imageClips.map(c=>({text:c.text,width:c.textStyle.width,fontSize:c.textStyle.fontSize,transform:c.transform,keyframes:c.keyframes,locked:c.layerLocked}))))]),
+    h('aside',e.textInspectorClip.value ? h(TextInspector,{clip:e.textInspectorClip.value,clips:e.textSelection.value,onEdit:e.editText,onBeginEdit:e.beginEdit,onEndEdit:e.endEdit,onSelectTrack:e.selectTrackText}) : null),
+  ]),
+])}}).mount('#app')
+</script></html>

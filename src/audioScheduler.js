@@ -80,19 +80,26 @@ export function createAudioScheduler(options = {}) {
     sources = []
   }
 
+  function boundedPlan(time,endTime){
+    if(time>=endTime)return []
+    return planAudioPlayback(clips,time,{trackState,includeFuture:true})
+      .filter(entry=>entry.delay<endTime-time-1e-8)
+      .map(entry=>({...entry,duration:Math.min(entry.duration,endTime-time-entry.delay)}))
+  }
+
   /** 按给定播放头时间重新排一遍音源：先全部解出缓冲，再统一从一个时刻起播。 */
-  async function play(time = 0) {
+  async function play(time = 0,{endTime=Infinity}={}) {
     const request = ++epoch
     started = true
     stopAll()
     await ensure()
     if (request !== epoch) return []
     const anchor = context.currentTime
-    let plan = planAudioPlayback(clips, time, { trackState, includeFuture: true })
+    let plan = boundedPlan(time,endTime)
     if (!plan.length) { started = true; return [] }
     await Promise.all(plan.map(entry => buffer(entry.assetId)))
     if (!context || request !== epoch) return []
-    plan = planAudioPlayback(clips, time + context.currentTime - anchor, { trackState, includeFuture: true })
+    plan = boundedPlan(time+context.currentTime-anchor,endTime)
     const base = context.currentTime + lookahead
     plan.forEach(entry => {
       const when = base + entry.delay
@@ -163,9 +170,9 @@ export function createAudioScheduler(options = {}) {
     pause,
     seek,
     resume: ensure,
-    async prepare() {
+    async prepare(range) {
       await ensure()
-      await Promise.all(clips.map(clip => buffer(clip.assetId)))
+      await Promise.all((range ? boundedPlan(range.start,range.end) : clips).map(clip=>buffer(clip.assetId)))
     },
     destroy,
     get problems() { return [...problems] },

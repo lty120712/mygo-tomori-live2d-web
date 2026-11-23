@@ -6,16 +6,37 @@ import { normalizeVolumeKeyframes } from './audioVolume.js'
 import { normalizeAudioFilter } from './audioFilters.js'
 import { normalizeBlendMode } from './visualComposite.js'
 import { isTextClip, normalizeText, normalizeSpeaker, normalizeTextStyle, TEXT_CLIP_LIMIT } from './textTracks.js'
+import {normalizeMediaCrop} from './mediaCrop.js'
+import {normalizeMediaAdjustments} from './mediaAdjustments.js'
+import {normalizeMediaAnimation} from './mediaAnimation.js'
+import {normalizeMediaMask} from './mediaMask.js'
+import {normalizeMarkers,MARKER_LIMIT} from './timelineMarkers.js'
+import {frameCountForDuration} from './timecode.js'
 
 export const SCENE_VERSION = 4
 export const SCENE_WIDTH = 960
 export const SCENE_HEIGHT = 540
+export const MAX_PROJECT_DURATION = 600
+const EMPTY_PROJECT_DURATION = 10
 export function sceneSize(aspectRatio){return aspectRatio==='9:16' ? {width:540,height:960} : {width:960,height:540}}
 export function uid(prefix = 'clip') {
   return prefix + '-' + crypto.randomUUID()
 }
 export function createProject() {
-  return { version: SCENE_VERSION, aspectRatio:'16:9', fps: 30, duration: 10, background: '#00b140', backgroundImage: '', backgroundImageName: '', clips: [], imageClips: [], backgroundClips: [], audioClips: [], audioTrackState: {}, assets: {} }
+  return { version: SCENE_VERSION, aspectRatio:'16:9', fps: 30, duration: EMPTY_PROJECT_DURATION, markers:[], background: '#00b140', backgroundImage: '', backgroundImageName: '', clips: [], imageClips: [], backgroundClips: [], audioClips: [], audioTrackState: {}, assets: {} }
+}
+export function syncProjectDuration(project) {
+  let end=0
+  for(const clips of [project.clips,project.imageClips,project.backgroundClips,project.audioClips]){
+    for(const clip of clips)end=Math.max(end,clip.start+clip.duration)
+  }
+  const fps=project.fps
+  const duration=end>0 ? Math.min(MAX_PROJECT_DURATION,Math.max(1,frameCountForDuration(end,fps))/fps) : EMPTY_PROJECT_DURATION
+  if(project.duration!==duration){
+    project.duration=duration
+    if(project.markers?.some(marker=>marker.time>duration))project.markers=normalizeMarkers(project.markers,duration,fps)
+  }
+  return duration
 }
 export function createClip(model, start = 0, duration = 5, track = 0) {
   return {
@@ -77,6 +98,14 @@ export function splitClip(clip, time) {
   right.id = uid()
   right.start = time
   right.duration -= elapsed
+  if(isTextClip(clip)){
+    const end=Math.max((clip.offset || 0)+clip.duration,clip.textAnimationEnd || 0)
+    clip.textAnimationEnd=end;right.textAnimationEnd=end
+  }
+  if(!clip.model && clip.assetId && clip.animation){
+    const end=Math.max((clip.offset || 0)+clip.duration,clip.mediaAnimationEnd || 0)
+    clip.mediaAnimationEnd=end;right.mediaAnimationEnd=end
+  }
   // 只有带源偏移的片段（模型 / 图片 / 音频）才推进偏移；背景片段没有这个字段。
   if (typeof right.offset === 'number') right.offset += elapsed
   clip.duration = elapsed
@@ -93,6 +122,8 @@ export function readProject(data, models) {
   project.aspectRatio=data.aspectRatio==='9:16' ? '9:16' : '16:9'
   project.fps = Math.round(number(data.fps, 30, 1, 60))
   project.duration = number(data.duration, 10, .5, 600)
+  if(data.markers!=null && (!Array.isArray(data.markers) || data.markers.length>MARKER_LIMIT))throw new Error('工程标记列表无效或超过 256 个')
+  project.markers=normalizeMarkers(data.markers,project.duration,project.fps)
   if (typeof data.background === 'string' && /^#[0-9a-f]{6}$/i.test(data.background)) project.background = data.background
   if (typeof data.backgroundImage === 'string' && data.backgroundImage) {
     if(data.backgroundImage.length > 4_000_000 || !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(data.backgroundImage))throw new Error('背景图片数据无效或过大')
@@ -111,6 +142,7 @@ export function readProject(data, models) {
     clip.layerName = typeof raw.layerName==='string' && raw.layerName.trim() ? raw.layerName.trim().slice(0,100) : model.name
     clip.mouseTrack = raw.mouseTrack !== false
     clip.blendMode = normalizeBlendMode(raw.blendMode)
+    if(raw.mask!=null)clip.mask=normalizeMediaMask(raw.mask)
     clip.layerLocked = raw.layerLocked === true
     clip.layerHidden = raw.layerHidden === true
     clip.layerSolo = raw.layerSolo === true
@@ -147,7 +179,13 @@ export function readProject(data, models) {
       const video = raw.media === 'video'
       const clip = createImageClip({ id: raw.assetId, name: typeof raw.name === 'string' ? raw.name : (video ? '视频' : '图片'), width: number(raw.width, 320, 1, 65536), height: number(raw.height, 180, 1, 65536) })
       clip.blendMode = normalizeBlendMode(raw.blendMode)
-      if(text){delete clip.assetId;clip.media='text';clip.text=normalizeText(raw.text);clip.speaker=normalizeSpeaker(raw.speaker);clip.textStyle=normalizeTextStyle(raw.textStyle)}
+      if(!text && raw.crop!=null)clip.crop=normalizeMediaCrop(raw.crop)
+      if(raw.mask!=null)clip.mask=normalizeMediaMask(raw.mask)
+      if(!text && raw.adjustments!=null)clip.adjustments=normalizeMediaAdjustments(raw.adjustments)
+      if(!text && raw.animation!=null)clip.animation=normalizeMediaAnimation(raw.animation)
+      if(!text && raw.mediaAnimationEnd!=null)clip.mediaAnimationEnd=number(raw.mediaAnimationEnd,0,0,1200)
+      if(!text)for(const key of ['flipX','flipY'])if(raw[key]!=null)clip[key]=raw[key]===true
+      if(text){delete clip.assetId;clip.media='text';clip.text=normalizeText(raw.text);clip.speaker=normalizeSpeaker(raw.speaker);clip.textStyle=normalizeTextStyle(raw.textStyle);if(raw.textAnimationEnd!=null)clip.textAnimationEnd=number(raw.textAnimationEnd,0,0,1200)}
       if (video) {
         clip.media = 'video'
         clip.videoMuted = raw.videoMuted === true
@@ -197,6 +235,7 @@ export function readProject(data, models) {
       clip.start = number(raw.start, 0, 0, project.duration - 1 / project.fps)
       clip.duration = number(raw.duration, project.duration - clip.start, 1 / project.fps, project.duration - clip.start)
       clip.layerHidden = raw.layerHidden === true
+      if(raw.mask!=null)clip.mask=normalizeMediaMask(raw.mask)
       clip.layerSolo = raw.layerSolo === true
       return clip
     })

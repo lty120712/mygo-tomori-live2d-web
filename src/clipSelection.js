@@ -6,12 +6,17 @@ export function copyClips(clips,ids,fps){
   const selected=clips.filter(c=>ids.includes(c.id) && !c.layerLocked)
   return selected.length ? {fps,clips:clone(selected),anchor:Math.min(...selected.map(c=>c.start))} : null
 }
-export function planClipSplit(clips,ids,time){
+export function clipSplitTargets(clips,ids,time){
   const selected=clips.filter(c=>ids.includes(c.id))
   if(selected.some(c=>c.layerLocked))return {error:'图层已锁定，请先解锁后切割'}
   const eligible=selected.filter(c=>time>c.start+1e-8 && time<c.start+c.duration-1e-8)
   if(!eligible.length)return {error:'播放头必须位于所选片段内部'}
   const error=visualClipLimit([...clips,...eligible]);if(error)return {error:'切割后超过限制：'+error}
+  return {eligible}
+}
+export function planClipSplit(clips,ids,time){
+  const {eligible,error}=clipSplitTargets(clips,ids,time)
+  if(error)return {error}
   const left=eligible.map(clone),right=left.map(c=>splitClip(c,time))
   return {left,right}
 }
@@ -48,7 +53,7 @@ export function planClipPaste(clips,clipboard,time,duration,fps){
   const copies=clone(clipboard.clips),at=Math.round(time*fps)/fps,ratio=fps/clipboard.fps
   for(const c of copies){
     c.start=Math.round((at+c.start-clipboard.anchor)*fps)/fps
-    if(c.start<0 || c.start+c.duration>duration+1e-8)return {error:'粘贴的整组片段超出工程时长，请移动播放头或延长工程'}
+    if(c.start<0 || c.start+c.duration>duration+1e-8)return {error:'粘贴的整组片段超出可用范围，请将播放头移到更早的位置'}
     c.id='clip-'+crypto.randomUUID();c.track=tracks.indexOf(c.track);c.layerLocked=false;c.name+=' · 副本'
     for(const [name,keys] of Object.entries(c.keyframes)){const frames=new Map();for(const key of keys){key.frame=Math.round(key.frame*ratio);frames.set(key.frame,key)}c.keyframes[name]=[...frames.values()].sort((a,b)=>a.frame-b.frame)}
     for(const event of c.events){event.id='event-'+crypto.randomUUID();event.frame=Math.round(event.frame*ratio)}

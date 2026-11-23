@@ -1,3 +1,6 @@
+// Frame-aligned seconds can round a fraction above an integer after multiplication.
+export const frameCountForDuration = (seconds,fps) => Math.ceil(seconds*fps-1e-8)
+
 export function formatTimecode(seconds, fps) {
   const total=Math.max(0,Math.round(seconds*fps)),whole=Math.floor(total/fps)
   return [Math.floor(whole/60),whole%60,total%fps].map(n=>String(n).padStart(2,'0')).join(':')

@@ -1,11 +1,14 @@
+import {TEXT_FONTS,textFontRevision} from './textFonts.js'
+import {normalizeTextAnimation,textGraphemes} from './textAnimation.js'
+export {TEXT_FONTS} from './textFonts.js'
 export const TEXT_CLIP_LIMIT=512
-export const TEXT_FONTS=[{value:'sans-serif',label:'系统黑体'},{value:'serif',label:'系统宋体'},{value:'monospace',label:'等宽字体'},{value:'Microsoft YaHei',label:'微软雅黑'},{value:'KaiTi',label:'楷体'}]
 export const isTextClip=clip=>clip?.media==='text' && !clip.model
 const clamp=(value,fallback,min,max)=>Number.isFinite(Number(value)) ? Math.max(min,Math.min(max,Number(value))) : fallback
 const color=(value,fallback)=>/^#[\da-f]{6}$/i.test(value || '') ? value : fallback
 export function normalizeTextStyle(raw={}){
   raw=raw && typeof raw==='object' ? raw : {}
   return {
+    ...normalizeTextAnimation(raw),
     fontFamily:TEXT_FONTS.some(f=>f.value===raw.fontFamily) ? raw.fontFamily : 'sans-serif',
     fontSize:clamp(raw.fontSize,48,8,200),color:color(raw.color,'#ffffff'),bold:raw.bold===true,italic:raw.italic===true,
     align:['left','center','right'].includes(raw.align) ? raw.align : 'center',width:clamp(raw.width,640,80,1920),
@@ -27,7 +30,7 @@ export function textFont(style){
   return `${style.italic ? 'italic ' : ''}${style.bold ? 'bold ' : ''}${style.fontSize}px ${family}, sans-serif`
 }
 export function layoutText(clip,measure){
-  const cacheable=!measure,signature=JSON.stringify([clip.text,clip.speaker,clip.textStyle])
+  const cacheable=!measure,signature=JSON.stringify([clip.text,clip.speaker,clip.textStyle,textFontRevision()])
   if(cacheable && layouts.get(clip)?.signature===signature)return layouts.get(clip).layout
   const style=normalizeTextStyle(clip.textStyle),font=textFont(style)
   if(!measure && typeof document!=='undefined'){
@@ -38,7 +41,7 @@ export function layoutText(clip,measure){
   const lines=[]
   for(const paragraph of normalizeText(clip.text).split('\n')){
     let line=''
-    for(const character of paragraph){
+    for(const character of textGraphemes(paragraph)){
       if(line && measure(line+character)>style.width){lines.push(line);line=''}
       line+=character
     }
@@ -55,11 +58,12 @@ export function layoutText(clip,measure){
     if(cacheable && measureContext)measureContext.font=font
   }
   const headerHeight=speaker ? style.speakerSize*1.35+(style.divider ? 12 : 8) : 0
-  const layout={style,font,lines,padding,lineHeight,width,speaker,speakerFont,headerHeight,height:Math.max(style.layout==='dialogue' ? style.boxMinHeight : 0,Math.max(1,lines.length)*lineHeight+padding*2+headerHeight)}
+  const lineCharacters=lines.map(textGraphemes),characterCount=lineCharacters.reduce((n,line)=>n+line.length,0)
+  const layout={style,font,lines,lineCharacters,characterCount,padding,lineHeight,width,speaker,speakerFont,headerHeight,height:Math.max(style.layout==='dialogue' ? style.boxMinHeight : 0,Math.max(1,lines.length)*lineHeight+padding*2+headerHeight)}
   if(cacheable)layouts.set(clip,{signature,layout})
   return layout
 }
-export function paintText(ctx,clip){
+export function paintText(ctx,clip,{reveal=Infinity}={}){
   const layout=layoutText(clip),{style,lines,padding,lineHeight,width,height}=layout
   ctx.save();ctx.font=layout.font;ctx.textAlign=style.align;ctx.textBaseline='middle';ctx.lineJoin='round'
   if(style.layout==='dialogue'){
@@ -77,12 +81,18 @@ export function paintText(ctx,clip){
     }
   }
   const x=style.align==='left' ? -width/2+padding : style.align==='right' ? width/2-padding : 0
-  lines.forEach((line,index)=>{
+  let remaining=reveal===Infinity ? Infinity : Math.floor(layout.characterCount*Math.max(0,Math.min(1,reveal)))
+  lines.forEach((fullLine,index)=>{
+    const characters=reveal===Infinity ? null : layout.lineCharacters[index],line=characters ? characters.slice(0,remaining).join('') : fullLine
+    if(characters)remaining=Math.max(0,remaining-characters.length)
     const y=-height/2+padding+layout.headerHeight+lineHeight*(index+.5)
     ctx.shadowColor=style.shadow ? style.shadowColor : 'transparent';ctx.shadowBlur=style.shadow ? style.shadowBlur : 0
     ctx.shadowOffsetX=style.shadow ? style.shadowX : 0;ctx.shadowOffsetY=style.shadow ? style.shadowY : 0
-    if(style.strokeWidth){ctx.lineWidth=style.strokeWidth*2;ctx.strokeStyle=style.strokeColor;ctx.strokeText(line,x,y);ctx.shadowColor='transparent'}
-    ctx.fillStyle=style.color;ctx.fillText(line,x,y)
+    // 沿用完整行的起点，居中／右对齐的文字不会随着逐字出现左右跳动。
+    const lineX=characters ? x-(style.align==='center' ? ctx.measureText(fullLine).width/2 : style.align==='right' ? ctx.measureText(fullLine).width : 0) : x
+    ctx.textAlign=characters ? 'left' : style.align
+    if(style.strokeWidth){ctx.lineWidth=style.strokeWidth*2;ctx.strokeStyle=style.strokeColor;ctx.strokeText(line,lineX,y);ctx.shadowColor='transparent'}
+    ctx.fillStyle=style.color;ctx.fillText(line,lineX,y)
   })
   ctx.restore()
 }

@@ -16,6 +16,7 @@
 import {ref,computed,onMounted,onBeforeUnmount,watch,nextTick} from 'vue'
 import {TRACK_TYPES,visualTrackType} from '../timelineAppearance.js'
 const props=defineProps({viewport:Object,clips:Array,audioClips:Array,backgroundClips:Array,duration:Number,time:Number})
+const emit=defineEmits(['navigate'])
 const map=ref(null),rows=ref([]),view=ref({x:0,y:0,w:1000,h:100})
 const kinds=computed(()=>[...new Set(rows.value.map(r=>r.kind))].filter(k=>TRACK_TYPES[k]))
 let observer,mutation,frame=null,drag=null,attached=null
@@ -40,12 +41,13 @@ function position(e){
   viewport.scrollTop=y*viewport.scrollHeight-viewport.clientHeight/2
   schedule()
 }
-function begin(e){if(e.button!==0)return;drag=e.pointerId;map.value.setPointerCapture(e.pointerId);e.preventDefault();position(e)}
+function begin(e){if(e.button!==0)return;emit('navigate');drag=e.pointerId;map.value.setPointerCapture(e.pointerId);e.preventDefault();position(e)}
 function move(e){if(drag===e.pointerId)position(e)}
 function end(){drag=null}
 function navigate(e){
   if(!['ArrowDown','ArrowUp','ArrowRight','ArrowLeft','Home','End'].includes(e.key))return
   e.preventDefault();e.stopPropagation()
+  emit('navigate')
   const v=props.viewport
   if(e.key==='ArrowDown')v.scrollTop+=60
   else if(e.key==='ArrowUp')v.scrollTop-=60

@@ -31,6 +31,16 @@ test('同一字段短时间连续调值合并，不同字段或超时独立；�
   h.edit(()=>s.state.project.duration=13,'duration');h.edit(()=>s.state.project.fps=60,'fps')
   h.undo();assert.equal(s.state.project.fps,30);h.undo();assert.equal(s.state.project.duration,12);assert.equal(h.canUndo,false)
 })
+
+test('按下后焦点重复开始编辑仍从按下前撤销，结束后的新手势独立',()=>{
+  const s=setup(),h=s.history
+  h.begin();h.edit(()=>s.state.project.duration=8);h.begin()
+  for(const value of [9,12,15])h.edit(()=>s.state.project.duration=value)
+  h.end();h.end();h.undo();assert.equal(s.state.project.duration,10);assert.equal(h.canUndo,false)
+  h.redo();assert.equal(s.state.project.duration,15)
+  h.begin();h.edit(()=>s.state.project.duration=20);h.end();h.undo();assert.equal(s.state.project.duration,15)
+  h.undo();assert.equal(s.state.project.duration,10)
+})
 test('撤销重置恢复该帧关键帧和预览；切割、删除及导入可往返且 ID 不变',()=>{
   const s=setup(),h=s.history,c=createClip({category:'adv',name:'test',entry:'test'},0,5,0)
   s.state.project.clips.push(c);s.state.selectedId=c.id

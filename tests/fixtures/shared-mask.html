@@ -1,0 +1,26 @@
+<!doctype html><html lang="zh-CN"><meta charset="UTF-8"><title>全视觉轨道遮罩隔离验证</title>
+<style>:root{font:13px system-ui;--editor-panel:#fff;--editor-soft:#f6f3f5;--editor-text:#342e35;--editor-muted:#817580;--editor-accent:#743a52;--editor-border:#ded5dc;--editor-focus:#ac7991;--editor-accent-soft:#f3e4eb;--editor-hover:#f6eaf0;--editor-radius:6px}body{margin:16px;background:#f6f3f5;color:#342e35}main{min-width:1050px}header{display:flex;gap:8px;align-items:center;margin-bottom:12px}.layout{display:grid;grid-template-columns:minmax(600px,1fr) 300px;gap:16px}.preview{height:480px;display:flex;flex-direction:column}aside{padding:16px;background:white}button{cursor:pointer;padding:6px}pre{white-space:pre-wrap;font-size:11px;max-height:120px;overflow:auto}output{display:block;padding:10px;background:white}.timeline{height:280px;margin-top:16px}</style><div id="app"></div><script type="module">
+import {createApp,h,ref} from 'vue'
+import models from 'virtual:model-manifest'
+import {createProject,createClip} from '../../src/sceneProject.js'
+import {createTextClip,createColorBackgroundClip,createImageBackgroundClip} from '../../src/mediaTracks.js'
+import {useSceneEditor} from '../../src/composables/useSceneEditor.js'
+import {createLocalStore,memoryDocumentBackend,SCENE_KEY} from '../../src/localStore.js'
+import {createAssetStore,memoryBackend} from '../../src/assetStore.js'
+import SceneCanvas from '../../src/components/SceneCanvas.vue'
+import MediaMaskInspector from '../../src/components/MediaMaskInspector.vue'
+import MultiTimeline from '../../src/components/MultiTimeline.vue'
+const assets=createAssetStore(memoryBackend(),{probeImage:async()=>({width:800,height:400})}),source=document.createElement('canvas');source.width=800;source.height=400
+const ctx=source.getContext('2d');['#e95858','#48bd7b','#478ee8','#f1ce57'].forEach((c,i)=>{ctx.fillStyle=c;ctx.fillRect(i*200,0,200,400)})
+const asset=await assets.importFile(new File([await new Promise(resolve=>source.toBlob(resolve))],'四色背景.png',{type:'image/png'})),store=createLocalStore(memoryDocumentBackend()),p=createProject()
+p.background='#547286';p.clips=[createClip(models[0])];p.clips[0].mouseTrack=false
+const text=createTextClip(0,5,1);text.text='模型、文字与背景\n共用遮罩';text.textStyle={...text.textStyle,layout:'dialogue',width:500,fontSize:60};text.speaker='遮罩回归';p.imageClips=[text]
+p.backgroundClips=[createColorBackgroundClip('#d79b65',0,5),createImageBackgroundClip(asset,5,5)];await store.set(SCENE_KEY,p)
+createApp({setup(){const e=useSceneEditor({store}),mode=ref('model'),result=ref('')
+function choose(next){mode.value=next;const clip=next==='model'?e.project.clips[0]:next==='text'?e.project.imageClips[0]:null;e.selectCanvas(clip?[clip.id]:[],clip?.id);e.seek(next==='image-background'?6:1)}
+function compare(){const out=e.sceneCanvas.value.getCanvas(),preview=document.querySelector('canvas[aria-label="场景合成画布"]');result.value=out.toDataURL()===preview.toDataURL()?'预览与导出帧逐像素一致':'帧不一致'}
+function record(){if(e.recorder.start(e.sceneCanvas.value.getCanvas(),null))setTimeout(()=>e.recorder.stop(),2000)}
+return ()=>h('main',[h('h2','模型／文字／背景遮罩 · 隔离内存工程'),h('header',[...['model','text','background','image-background'].map((key,i)=>h('button',{onClick:()=>choose(key)},['模型','文字','纯色背景','图片背景'][i])),h('button',{onClick:e.undo,disabled:!e.canUndo.value},'撤销'),h('button',{onClick:e.redo,disabled:!e.canRedo.value},'重做'),h('button',{onClick:()=>e.transformModel(e.selected.value.id,{rotation:30,scaleX:1.3,scaleY:.7}),disabled:!e.selected.value},'旋转与拉伸'),h('button',{onClick:()=>e.changeLayerState(e.selected.value.track,{layerLocked:!e.selected.value.layerLocked}),disabled:!e.selected.value},'切换锁定'),h('button',{onClick:compare},'比较预览与导出帧'),h('button',{onClick:record},'录制两秒 MP4')]),
+h('div',{class:'layout'},[h('section',[h('div',{class:'preview'},[h(SceneCanvas,{clips:e.allClips.value.filter(c=>mode.value==='model'?!!c.model:mode.value==='text'?c.media==='text':false),backgroundClips:e.project.backgroundClips,assetProvider:assets,background:e.project.background,time:e.time.value,duration:10,fps:30,aspectRatio:'16:9',selected:e.selected.value,selectedIds:e.canvasSelection.value,runtimes:e.runtimes,ref:e.sceneCanvas,onReady:e.runtimeReady,onDispose:e.disposeRuntime,onError:e.runtimeError,onSelect:e.selectCanvas,onTransform:e.transformModel,onMove:e.moveModel,onBeginEdit:e.beginEdit,onEndEdit:e.endEdit})]),h('output',result.value),h('pre',JSON.stringify({mode:mode.value,selected:e.selected.value?.mask,background:e.project.backgroundClips.map(c=>({kind:c.kind,mask:c.mask})),message:e.message.value},null,2))]),h('aside',e.selected.value?h(MediaMaskInspector,{clip:e.selected.value,disabled:e.editLocked.value,onEdit:patch=>e.editClip(e.selected.value.id,patch),onBeginEdit:e.beginEdit,onEndEdit:e.endEdit}):'点击下面的背景片段，再点时间线工具栏「画面遮罩」。')]),
+h('div',{class:'timeline'},[h(MultiTimeline,{clips:[],backgroundClips:e.project.backgroundClips,duration:10,fps:30,time:e.time.value,labels:e.paramLabels.value,transformFields:e.transformFields,disabled:e.locked.value,onBackgroundEdit:e.editBackground,onBeginEdit:e.beginEdit,onEndEdit:e.endEdit,onSeek:e.seek})])])}}).mount('#app')
+</script></html>
